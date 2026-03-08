@@ -1,0 +1,14 @@
+{
+  "name": "remoteagent-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JS gateway for IM platform integration",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0"
+  }
+}

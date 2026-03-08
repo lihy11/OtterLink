@@ -1,0 +1,7 @@
+/target/
+/.run/
+/longconn/node_modules/
+/gateway/node_modules/
+/workspace/
+.DS_Store
+.claude

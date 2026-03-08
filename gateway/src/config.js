@@ -1,0 +1,38 @@
+const path = require('node:path');
+
+function parseList(value) {
+  return new Set(
+    String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
+function loadConfig(env = process.env) {
+  return {
+    bind: env.BIND || '127.0.0.1:3000',
+    coreBaseUrl: env.CORE_BASE_URL || 'http://127.0.0.1:3001',
+    coreIngestToken: env.CORE_INGEST_TOKEN || '',
+    gatewayEventToken: env.GATEWAY_EVENT_TOKEN || env.BRIDGE_NOTIFY_TOKEN || '',
+    bridgeIngestToken: env.BRIDGE_INGEST_TOKEN || '',
+    notifyToken: env.BRIDGE_NOTIFY_TOKEN || '',
+    appId: env.APP_ID || '',
+    appSecret: env.APP_SECRET || '',
+    feishuAuthMode: env.FEISHU_AUTH_MODE || 'off',
+    pairAuthToken: env.PAIR_AUTH_TOKEN || '',
+    allowFromOpenIds: parseList(env.ALLOW_FROM_OPEN_IDS),
+    pairStorePath: env.PAIR_STORE_PATH || path.join(process.cwd(), '.run', 'pairings.json'),
+    disableWs: matchesTrue(env.FEISHU_DISABLE_WS),
+  };
+}
+
+function matchesTrue(value) {
+  return ['1', 'true', 'TRUE', 'yes', 'YES'].includes(String(value || ''));
+}
+
+module.exports = {
+  loadConfig,
+  parseList,
+  matchesTrue,
+};
