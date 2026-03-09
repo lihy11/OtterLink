@@ -89,14 +89,21 @@ async function main() {
     console.log('[gateway] Feishu WS client started');
   }
 
-  const shutdown = () => {
+  let shuttingDown = false;
+  const shutdown = (reason = 'shutdown') => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    console.log(`[gateway] ${reason}`);
     if (wsClient) {
       wsClient.close();
     }
     server.close(() => process.exit(0));
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('received SIGINT'));
+  process.on('SIGTERM', () => shutdown('received SIGTERM'));
+  process.on('SIGHUP', () => shutdown('received SIGHUP for reload'));
 }
 
 function authorize(req, expected, headerName) {

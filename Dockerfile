@@ -17,7 +17,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /app/target/release/feishu-acp-bridge-demo /usr/local/bin/feishu-acp-bridge-demo
 
-ENV BIND=0.0.0.0:3000
-EXPOSE 3000
+ENV CORE_BIND=0.0.0.0:7211
+EXPOSE 7211
 
 CMD ["feishu-acp-bridge-demo"]

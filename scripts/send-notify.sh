@@ -6,7 +6,7 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-: "${BIND:=127.0.0.1:3000}"
+: "${BIND:=127.0.0.1:1127}"
 : "${BRIDGE_NOTIFY_TOKEN:?missing BRIDGE_NOTIFY_TOKEN}"
 
 text="$1"

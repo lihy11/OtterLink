@@ -1,0 +1,110 @@
+# 安装部署
+
+## 目标
+
+推荐在 Linux 上以两个长期运行的进程部署：
+
+1. Rust `core`
+2. Node.js `gateway`
+
+推荐用 `systemd` 托管，原因：
+
+- 进程异常退出后自动拉起
+- 可用 `journalctl` 集中看日志
+- 支持 `systemctl reload` 触发受控重启
+
+运行后可通过飞书 `/runtime stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖 shell 注入 `Ctrl+C`。
+
+## 依赖
+
+```bash
+rustup toolchain install stable
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs build-essential pkg-config libssl-dev
+```
+
+需要提前准备：
+
+- 飞书应用 `APP_ID` / `APP_SECRET`
+- 本机可执行的 `claude` / `codex` / ACP agent
+- 真实 `~/.claude`，如果要导入 Claude 历史 session
+
+## 构建
+
+```bash
+cargo build --release
+cd gateway && npm ci
+```
+
+## 环境文件
+
+复制：
+
+```bash
+sudo mkdir -p /etc/remoteagent /var/lib/remoteagent
+sudo cp deploy/systemd/remoteagent.env.example /etc/remoteagent/remoteagent.env
+sudo chown -R "$USER":"$(id -gn)" /etc/remoteagent /var/lib/remoteagent
+```
+
+然后按实际环境修改 `/etc/remoteagent/remoteagent.env`。
+
+如果你需要在飞书里对 `codex` 执行 `/runtime load`，记得把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`。
+
+## 安装 systemd 单元
+
+```bash
+sudo SERVICE_USER="$USER" \
+  SERVICE_GROUP="$(id -gn)" \
+  ENV_FILE=/etc/remoteagent/remoteagent.env \
+  ./scripts/install-systemd.sh
+```
+
+## 启动
+
+```bash
+sudo systemctl start remoteagent-core
+sudo systemctl start remoteagent-gateway
+```
+
+或：
+
+```bash
+sudo systemctl start remoteagent.target
+```
+
+## 重载
+
+当前重载语义是“受控退出 + systemd 自动拉起”：
+
+```bash
+sudo ./scripts/reload-systemd.sh
+```
+
+等价于：
+
+```bash
+sudo systemctl reload remoteagent-core
+sudo systemctl reload remoteagent-gateway
+```
+
+适合以下场景：
+
+- env 文件变更
+- gateway 渲染逻辑变更后重新部署
+- Rust binary 升级后无状态切换
+
+## 日志
+
+```bash
+sudo journalctl -u remoteagent-core -f
+sudo journalctl -u remoteagent-gateway -f
+```
+
+## 升级
+
+```bash
+git pull
+cargo build --release
+cd gateway && npm ci
+sudo ./scripts/reload-systemd.sh
+```

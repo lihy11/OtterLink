@@ -31,6 +31,10 @@ pub struct CoreControlRequest {
     pub label: Option<String>,
     #[serde(default)]
     pub agent_kind: Option<String>,
+    #[serde(default)]
+    pub proxy_mode: Option<String>,
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,9 +42,13 @@ pub struct CoreControlResponse {
     pub ok: bool,
     pub message: String,
     #[serde(default)]
+    pub selector: Option<RuntimeSelectorSummary>,
+    #[serde(default)]
     pub active_runtime: Option<RuntimeSummary>,
     #[serde(default)]
     pub runtimes: Vec<RuntimeSummary>,
+    #[serde(default)]
+    pub history_overview: Option<RuntimeHistoryOverview>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,9 +57,22 @@ pub enum ControlAction {
     ShowRuntime,
     ListRuntimes,
     LoadRuntimes,
+    UseAgent,
     CreateRuntime,
     SwitchRuntime,
     SetWorkspace,
+    SetProxy,
+    StopRuntime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSelectorSummary {
+    pub agent_kind: String,
+    pub workspace_path: String,
+    pub has_selected_runtime: bool,
+    pub proxy_mode: String,
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +89,18 @@ pub struct RuntimeSummary {
     pub prompt_preview: Option<String>,
     pub has_runtime_session_ref: bool,
     pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeHistoryOverview {
+    pub runtime_session_ref: String,
+    pub turns: Vec<RuntimeHistoryTurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeHistoryTurn {
+    pub user_text: String,
+    pub assistant_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

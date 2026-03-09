@@ -16,8 +16,8 @@ if [ -f .run/feishu.env ]; then
   source .run/feishu.env
   set +a
   FEISHU_DISABLE_WS=1 ./scripts/start-longconn.sh
-  curl --noproxy '*' -fsS http://127.0.0.1:3001/healthz >/dev/null
-  curl --noproxy '*' -fsS http://127.0.0.1:3000/healthz >/dev/null
+  curl --noproxy '*' -fsS http://127.0.0.1:7211/healthz >/dev/null
+  curl --noproxy '*' -fsS http://127.0.0.1:1127/healthz >/dev/null
   ./scripts/stop-longconn.sh
 fi
 

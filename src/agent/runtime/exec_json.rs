@@ -63,6 +63,7 @@ impl ExecJsonRuntime {
 impl AgentRuntime for ExecJsonRuntime {
     async fn start_turn(&self, request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
+        let (cancel, mut cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
         let config = self.config.clone();
         let completion = tokio::spawn(async move {
             let workspace_path = request
@@ -77,6 +78,12 @@ impl AgentRuntime for ExecJsonRuntime {
                 .stderr(Stdio::piped())
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
+            apply_proxy_env(
+                &mut cmd,
+                request.proxy_mode.as_deref(),
+                request.proxy_url.as_deref().or(config.acp_proxy_url.as_deref()),
+                request.agent_kind.as_deref().unwrap_or("codex"),
+            );
 
             let mut child = cmd.spawn().context("failed to spawn codex process")?;
             let stdout = child.stdout.take().ok_or_else(|| anyhow!("missing stdout"))?;
@@ -93,36 +100,50 @@ impl AgentRuntime for ExecJsonRuntime {
                 stderr_buf
             });
 
-            while let Some(line) = out_lines
-                .next_line()
-                .await
-                .context("read codex stdout failed")?
-            {
-                let line_trimmed = line.trim();
-                if line_trimmed.is_empty() {
-                    continue;
-                }
+            let mut interrupted = false;
+            loop {
+                tokio::select! {
+                    changed = cancel_rx.changed() => {
+                        if changed.is_ok() && *cancel_rx.borrow() {
+                            interrupted = true;
+                            let _ = child.start_kill();
+                            break;
+                        }
+                    }
+                    maybe_line = out_lines.next_line() => {
+                        let Some(line) = maybe_line.context("read codex stdout failed")? else {
+                            break;
+                        };
+                        let line_trimmed = line.trim();
+                        if line_trimmed.is_empty() {
+                            continue;
+                        }
 
-                let value: Value = match serde_json::from_str(line_trimmed) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+                        let value: Value = match serde_json::from_str(line_trimmed) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
 
-                let events = normalize_exec_json_event(&value);
-                let has_todo_update = events
-                    .iter()
-                    .any(|event| matches!(event, NormalizedAgentEvent::PlanUpdated(_)));
-                for event in events {
-                    let _ = events_tx.send(RuntimeEvent::Agent(event));
-                }
+                        let events = normalize_exec_json_event(&value);
+                        let has_todo_update = events
+                            .iter()
+                            .any(|event| matches!(event, NormalizedAgentEvent::PlanUpdated(_)));
+                        for event in events {
+                            let _ = events_tx.send(RuntimeEvent::Agent(event));
+                        }
 
-                if has_todo_update {
-                    let _ = events_tx.send(RuntimeEvent::TodoLog(json!(value)));
+                        if has_todo_update {
+                            let _ = events_tx.send(RuntimeEvent::TodoLog(json!(value)));
+                        }
+                    }
                 }
             }
 
             let status = child.wait().await.context("wait codex process failed")?;
             let stderr_text = stderr_task.await.unwrap_or_default();
+            if interrupted {
+                return Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT));
+            }
             if !status.success() {
                 return Err(anyhow!(
                     "Codex 执行失败，status={}，stderr={}.",
@@ -133,16 +154,48 @@ impl AgentRuntime for ExecJsonRuntime {
 
             Ok(RuntimeCompletion {
                 stderr_summary: (!stderr_text.trim().is_empty()).then_some(stderr_text),
+                stop_reason: Some("end_turn".to_string()),
             })
         });
 
         Ok(RuntimeTurn {
             events: events_rx,
             completion,
+            cancel,
         })
     }
 
     fn name(&self) -> &'static str {
         "exec_json"
+    }
+}
+
+fn apply_proxy_env(
+    cmd: &mut Command,
+    proxy_mode: Option<&str>,
+    proxy_url: Option<&str>,
+    agent_kind: &str,
+) {
+    let effective_mode = match proxy_mode.unwrap_or("default") {
+        "on" => "on",
+        "off" => "off",
+        _ if agent_kind == "codex" => "on",
+        _ => "off",
+    };
+
+    match effective_mode {
+        "off" => {
+            for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                cmd.env_remove(key);
+            }
+        }
+        "on" => {
+            if let Some(value) = proxy_url.filter(|value| !value.trim().is_empty()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                    cmd.env(key, value);
+                }
+            }
+        }
+        _ => {}
     }
 }

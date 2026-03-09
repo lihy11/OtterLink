@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${BIND:=127.0.0.1:3000}"
+: "${BIND:=127.0.0.1:1127}"
 : "${BRIDGE_NOTIFY_TOKEN:?missing BRIDGE_NOTIFY_TOKEN}"
 
 open_id="${1:-}"

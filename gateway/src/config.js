@@ -11,8 +11,8 @@ function parseList(value) {
 
 function loadConfig(env = process.env) {
   return {
-    bind: env.BIND || '127.0.0.1:3000',
-    coreBaseUrl: env.CORE_BASE_URL || 'http://127.0.0.1:3001',
+    bind: env.BIND || '127.0.0.1:1127',
+    coreBaseUrl: env.CORE_BASE_URL || 'http://127.0.0.1:7211',
     coreIngestToken: env.CORE_INGEST_TOKEN || '',
     gatewayEventToken: env.GATEWAY_EVENT_TOKEN || env.BRIDGE_NOTIFY_TOKEN || '',
     bridgeIngestToken: env.BRIDGE_INGEST_TOKEN || '',

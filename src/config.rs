@@ -12,6 +12,8 @@ pub struct Config {
     pub gateway_event_token: Option<String>,
     pub state_db_path: PathBuf,
     pub claude_home_dir: PathBuf,
+    pub codex_home_dir: PathBuf,
+    pub acp_proxy_url: Option<String>,
     pub codex_bin: String,
     pub codex_workdir: PathBuf,
     pub codex_model: Option<String>,
@@ -27,14 +29,14 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let core_bind = env::var("CORE_BIND")
             .or_else(|_| env::var("BIND"))
-            .unwrap_or_else(|_| "127.0.0.1:3001".to_string())
+            .unwrap_or_else(|_| "127.0.0.1:7211".to_string())
             .parse()
             .context("invalid CORE_BIND, expected host:port")?;
         let core_ingest_token = env::var("CORE_INGEST_TOKEN")
             .ok()
             .filter(|v| !v.trim().is_empty());
         let gateway_event_url = env::var("GATEWAY_EVENT_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:3000/internal/gateway/event".to_string());
+            .unwrap_or_else(|_| "http://127.0.0.1:1127/internal/gateway/event".to_string());
         let gateway_event_token = env::var("GATEWAY_EVENT_TOKEN")
             .ok()
             .filter(|v| !v.trim().is_empty());
@@ -49,6 +51,20 @@ impl Config {
                     .unwrap_or_else(|_| PathBuf::from("."))
                     .join(".claude")
             });
+        let codex_home_dir = env::var("CODEX_HOME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                env::var("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".codex")
+            });
+        let acp_proxy_url = env::var("ACP_PROXY_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| env::var("ALL_PROXY").ok().filter(|v| !v.trim().is_empty()))
+            .or_else(|| env::var("HTTPS_PROXY").ok().filter(|v| !v.trim().is_empty()))
+            .or_else(|| env::var("HTTP_PROXY").ok().filter(|v| !v.trim().is_empty()));
         let codex_bin = env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
         let codex_workdir = env::var("CODEX_WORKDIR").map(PathBuf::from).unwrap_or(
             env::current_dir()
@@ -61,7 +77,7 @@ impl Config {
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(true);
         let runtime_mode = env::var("RUNTIME_MODE").unwrap_or_else(|_| "acp_fallback".to_string());
-        let acp_adapter = env::var("ACP_ADAPTER").unwrap_or_else(|_| "codex".to_string());
+        let acp_adapter = env::var("ACP_ADAPTER").unwrap_or_else(|_| "claude_code".to_string());
         let acp_agent_cmd = env::var("ACP_AGENT_CMD")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -83,6 +99,8 @@ impl Config {
             gateway_event_token,
             state_db_path,
             claude_home_dir,
+            codex_home_dir,
+            acp_proxy_url,
             codex_bin,
             codex_workdir,
             codex_model,

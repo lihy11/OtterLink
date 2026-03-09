@@ -22,19 +22,105 @@ use crate::{
         message_builder::{card_message, text_message},
         models::{CardBlock, CardTheme, OutboundMessage, TodoEntry},
         persistence::{Persistence, RuntimeInstance},
+        persistence::RuntimeSelection,
         ports::TurnEventSink,
         registry::{SessionInfo, SessionRegistry},
         support::{append_jsonl, shorten},
     },
     protocol::{
         ControlAction, CoreControlRequest, CoreControlResponse, CoreOutboundEvent, CoreTurnAccepted,
-        CoreTurnRequest, OutboundSlot, RuntimeSummary,
+        CoreTurnRequest, OutboundSlot, RuntimeSelectorSummary, RuntimeSummary,
     },
 };
 
 #[derive(Clone, Default)]
 pub struct SessionLocks {
     locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+}
+
+#[derive(Clone)]
+struct ActiveTurnEntry {
+    turn_id: String,
+    state: ActiveTurnState,
+}
+
+#[derive(Clone)]
+enum ActiveTurnState {
+    Starting { stop_requested: bool },
+    Running { cancel: crate::agent::runtime::RuntimeCancelHandle },
+}
+
+#[derive(Clone, Default)]
+struct ActiveTurns {
+    turns: Arc<Mutex<HashMap<String, ActiveTurnEntry>>>,
+}
+
+impl ActiveTurns {
+    async fn set_starting(&self, session_key: &str, turn_id: &str) {
+        let mut guard = self.turns.lock().await;
+        guard.insert(
+            session_key.to_string(),
+            ActiveTurnEntry {
+                turn_id: turn_id.to_string(),
+                state: ActiveTurnState::Starting {
+                    stop_requested: false,
+                },
+            },
+        );
+    }
+
+    async fn attach_cancel(
+        &self,
+        session_key: &str,
+        turn_id: &str,
+        cancel: crate::agent::runtime::RuntimeCancelHandle,
+    ) {
+        let mut guard = self.turns.lock().await;
+        let Some(entry) = guard.get_mut(session_key) else {
+            return;
+        };
+        if entry.turn_id != turn_id {
+            return;
+        }
+
+        let stop_requested = matches!(
+            entry.state,
+            ActiveTurnState::Starting {
+                stop_requested: true
+            }
+        );
+        entry.state = ActiveTurnState::Running {
+            cancel: cancel.clone(),
+        };
+        if stop_requested {
+            cancel.cancel();
+        }
+    }
+
+    async fn request_stop(&self, session_key: &str) -> Option<String> {
+        let mut guard = self.turns.lock().await;
+        let entry = guard.get_mut(session_key)?;
+        match &mut entry.state {
+            ActiveTurnState::Starting { stop_requested } => {
+                *stop_requested = true;
+            }
+            ActiveTurnState::Running { cancel } => {
+                cancel.cancel();
+            }
+        }
+        Some(entry.turn_id.clone())
+    }
+
+    async fn clear(&self, session_key: &str, turn_id: &str) {
+        let mut guard = self.turns.lock().await;
+        let should_remove = guard
+            .get(session_key)
+            .map(|entry| entry.turn_id == turn_id)
+            .unwrap_or(false);
+        if should_remove {
+            guard.remove(session_key);
+        }
+    }
 }
 
 impl SessionLocks {
@@ -55,6 +141,7 @@ pub struct CoreService {
     pub persistence: Persistence,
     pub registry: SessionRegistry,
     session_locks: SessionLocks,
+    active_turns: ActiveTurns,
 }
 
 impl CoreService {
@@ -72,6 +159,7 @@ impl CoreService {
             persistence,
             registry,
             session_locks: SessionLocks::default(),
+            active_turns: ActiveTurns::default(),
         }
     }
 
@@ -81,7 +169,17 @@ impl CoreService {
             .resolve(&request.session_key, request.parent_session_key.as_deref())
             .await
             .context("resolve session failed")?;
-        let runtime = self.ensure_active_runtime(&session).await?;
+        let selection = self.ensure_runtime_selection(&session).await?;
+        let selected_runtime_id = selection.selected_runtime_id.as_deref().ok_or_else(|| {
+            anyhow!(
+                "当前还没有选定会话，请先执行 `/runtime use <claude|codex>`，然后用 `/runtime pick <short_id>` 或 `/runtime new`。"
+            )
+        })?;
+        let runtime = self
+            .persistence
+            .get_runtime(selected_runtime_id)
+            .await?
+            .ok_or_else(|| anyhow!("selected runtime not found: {}", selected_runtime_id))?;
 
         self.persistence
             .create_turn(&request.turn_id, &session.session_id, &request.text)
@@ -90,8 +188,9 @@ impl CoreService {
 
         let service = self.clone();
         let turn_id = request.turn_id.clone();
+        let selection = selection.clone();
         tokio::spawn(async move {
-            if let Err(err) = service.run_turn(request, session, runtime).await {
+            if let Err(err) = service.run_turn(request, session, selection, runtime).await {
                 error!("turn failed: {err:?}");
             }
         });
@@ -108,145 +207,293 @@ impl CoreService {
             .resolve(&request.session_key, request.parent_session_key.as_deref())
             .await
             .context("resolve session failed")?;
+        let selector = self.ensure_runtime_selection(&session).await?;
 
         let response = match request.action {
             ControlAction::ShowRuntime => {
-                let active = self.ensure_active_runtime(&session).await?;
+                let active = self.selected_runtime(&selector).await?;
                 CoreControlResponse {
                     ok: true,
-                    message: format!(
-                        "当前会话已绑定 `{}`，workspace=`{}`。",
-                        active.label, active.workspace_path
-                    ),
-                    active_runtime: Some(runtime_summary(&active)),
+                    message: if let Some(active) = active.as_ref() {
+                        format!("当前已选定 `{}`。", active.label)
+                    } else {
+                        "当前已选定 agent 与 workspace，请继续选择会话或新建。".to_string()
+                    },
+                    selector: Some(selector_summary(&selector)),
+                    active_runtime: active.as_ref().map(|runtime| runtime_summary(runtime, selector.selected_runtime_id.as_deref())),
                     runtimes: Vec::new(),
+                    history_overview: None,
                 }
             }
             ControlAction::ListRuntimes => {
-                let active = self.ensure_active_runtime(&session).await?;
-                let runtimes = self.persistence.list_runtimes(&session.session_key).await?;
+                let runtimes = self.list_selector_runtimes(&selector).await?;
                 CoreControlResponse {
                     ok: true,
-                    message: format!("当前共有 {} 个 runtime。", runtimes.len()),
-                    active_runtime: Some(runtime_summary(&active)),
-                    runtimes: runtimes.iter().map(runtime_summary).collect(),
+                    message: if runtimes.is_empty() {
+                        format!("`{}` 在当前 workspace 下还没有可选会话，请执行 `/runtime new`。", selector.agent_kind)
+                    } else {
+                        format!("当前共有 {} 个可选会话，请执行 `/runtime pick <short_id>`。", runtimes.len())
+                    },
+                    selector: Some(selector_summary(&selector)),
+                    active_runtime: self
+                        .selected_runtime(&selector)
+                        .await?
+                        .as_ref()
+                        .map(|runtime| runtime_summary(runtime, selector.selected_runtime_id.as_deref())),
+                    runtimes: runtimes
+                        .iter()
+                        .map(|runtime| runtime_summary(runtime, selector.selected_runtime_id.as_deref()))
+                        .collect(),
+                    history_overview: None,
                 }
             }
             ControlAction::LoadRuntimes => {
-                let active = self.ensure_active_runtime(&session).await?;
-                let workspace =
-                    self.resolve_runtime_load_workspace(request.workspace_path.as_deref(), &active)?;
-                let imported = self.load_claude_runtimes(&session.session_key, &workspace).await?;
-                let active = self.ensure_active_runtime(&session).await?;
-                let runtimes = self.persistence.list_runtimes(&session.session_key).await?;
+                let workspace = self.resolve_runtime_load_workspace(
+                    request.workspace_path.as_deref(),
+                    &selector.workspace_path,
+                )?;
+                let updated_selector = self
+                    .replace_runtime_selection(&session, &selector.agent_kind, &workspace, None, None, None)
+                    .await?;
+                let imported = self.load_agent_runtimes(&updated_selector).await?;
+                let runtimes = self.list_selector_runtimes(&updated_selector).await?;
                 CoreControlResponse {
                     ok: true,
-                    message: if imported == 0 {
-                        format!("在 `{}` 下没有找到可导入的 Claude session。", workspace)
+                    message: if runtimes.is_empty() {
+                        format!(
+                            "`{}` 在 `{}` 下没有可选会话，请执行 `/runtime new`。",
+                            updated_selector.agent_kind, workspace
+                        )
                     } else {
-                        format!("已从 `{}` 导入 {} 个 Claude session。", workspace, imported)
+                        format!(
+                            "`{}` 已在 `{}` 下加载 {} 个会话，请执行 `/runtime pick <short_id>`。",
+                            updated_selector.agent_kind,
+                            workspace,
+                            runtimes.len().max(imported)
+                        )
                     },
-                    active_runtime: Some(runtime_summary(&active)),
-                    runtimes: runtimes.iter().map(runtime_summary).collect(),
+                    selector: Some(selector_summary(&updated_selector)),
+                    active_runtime: None,
+                    runtimes: runtimes
+                        .iter()
+                        .map(|runtime| runtime_summary(runtime, updated_selector.selected_runtime_id.as_deref()))
+                        .collect(),
+                    history_overview: None,
+                }
+            }
+            ControlAction::UseAgent => {
+                let agent_kind = normalize_agent_kind(
+                    request
+                        .agent_kind
+                        .as_deref()
+                        .or(request.runtime_selector.as_deref())
+                        .ok_or_else(|| anyhow!("use_agent requires agent_kind"))?,
+                )?;
+                let updated_selector = self
+                    .replace_runtime_selection(
+                        &session,
+                        &agent_kind,
+                        &selector.workspace_path,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?;
+                let _ = self.load_agent_runtimes(&updated_selector).await?;
+                let runtimes = self.list_selector_runtimes(&updated_selector).await?;
+                CoreControlResponse {
+                    ok: true,
+                    message: if runtimes.is_empty() {
+                        format!("已切换到 `{}`，当前 workspace 下暂无可选会话，请执行 `/runtime new`。", agent_kind)
+                    } else {
+                        format!("已切换到 `{}`，请从下方选择会话，或执行 `/runtime new`。", agent_kind)
+                    },
+                    selector: Some(selector_summary(&updated_selector)),
+                    active_runtime: None,
+                    runtimes: runtimes
+                        .iter()
+                        .map(|runtime| runtime_summary(runtime, updated_selector.selected_runtime_id.as_deref()))
+                        .collect(),
+                    history_overview: None,
                 }
             }
             ControlAction::CreateRuntime => {
-                let workspace = self.resolve_workspace_path(request.workspace_path.as_deref())?;
-                let agent_kind = request
-                    .agent_kind
-                    .clone()
-                    .unwrap_or_else(|| self.config.acp_adapter.clone());
+                let workspace = self.resolve_workspace_path(
+                    request.workspace_path.as_deref().or(Some(selector.workspace_path.as_str())),
+                )?;
+                let agent_kind = normalize_agent_kind(
+                    request
+                        .agent_kind
+                        .as_deref()
+                        .unwrap_or(selector.agent_kind.as_str()),
+                )?;
                 let runtime = self
                     .persistence
                     .create_runtime(
-                        &session.session_key,
+                        &runtime_scope_key(&agent_kind, &workspace),
                         request
                             .label
                             .as_deref()
                             .unwrap_or(&default_runtime_label(&agent_kind, &workspace)),
                         &agent_kind,
                         &workspace,
-                        true,
+                        false,
+                    )
+                    .await?;
+                let selected = self
+                    .replace_runtime_selection(
+                        &session,
+                        &agent_kind,
+                        &workspace,
+                        Some(&runtime.runtime_id),
+                        None,
+                        None,
                     )
                     .await?;
                 self.activate_runtime(&session, &runtime).await?;
+                let runtimes = self.list_selector_runtimes(&selected).await?;
                 CoreControlResponse {
                     ok: true,
                     message: format!("已新建并切换到 `{}`。", runtime.label),
-                    active_runtime: Some(runtime_summary(&runtime)),
-                    runtimes: self
-                        .persistence
-                        .list_runtimes(&session.session_key)
-                        .await?
+                    selector: Some(selector_summary(&selected)),
+                    active_runtime: Some(runtime_summary(&runtime, selected.selected_runtime_id.as_deref())),
+                    runtimes: runtimes
                         .iter()
-                        .map(runtime_summary)
+                        .map(|item| runtime_summary(item, selected.selected_runtime_id.as_deref()))
                         .collect(),
+                    history_overview: None,
                 }
             }
             ControlAction::SwitchRuntime => {
-                let selector = request
+                let runtime_selector = request
                     .runtime_selector
                     .as_deref()
-                    .ok_or_else(|| anyhow!("switch_runtime requires runtime_selector"))?;
-                let runtimes = self.persistence.list_runtimes(&session.session_key).await?;
+                    .ok_or_else(|| anyhow!("pick runtime requires runtime_selector"))?;
+                let runtimes = self.list_selector_runtimes(&selector).await?;
                 let runtime = runtimes
                     .into_iter()
-                    .find(|runtime| runtime_matches_selector(runtime, selector))
-                    .ok_or_else(|| anyhow!("runtime not found: {}", selector))?;
+                    .find(|runtime| runtime_matches_selector(runtime, runtime_selector))
+                    .ok_or_else(|| anyhow!("runtime not found: {}", runtime_selector))?;
+                let selected = self
+                    .replace_runtime_selection(
+                        &session,
+                        &runtime.agent_kind,
+                        &runtime.workspace_path,
+                        Some(&runtime.runtime_id),
+                        None,
+                        None,
+                    )
+                    .await?;
                 self.activate_runtime(&session, &runtime).await?;
+                let history_overview = self
+                    .load_runtime_history_overview(&selected, &runtime)
+                    .await?;
                 CoreControlResponse {
                     ok: true,
-                    message: format!("已切换到 `{}`。", runtime.label),
-                    active_runtime: Some(runtime_summary(&runtime)),
+                    message: format!("已选定 `{}`。", runtime.label),
+                    selector: Some(selector_summary(&selected)),
+                    active_runtime: Some(runtime_summary(&runtime, selected.selected_runtime_id.as_deref())),
                     runtimes: self
-                        .persistence
-                        .list_runtimes(&session.session_key)
+                        .list_selector_runtimes(&selected)
                         .await?
                         .iter()
-                        .map(runtime_summary)
+                        .map(|item| runtime_summary(item, selected.selected_runtime_id.as_deref()))
                         .collect(),
+                    history_overview,
                 }
             }
             ControlAction::SetWorkspace => {
                 let workspace = self.resolve_workspace_path(request.workspace_path.as_deref())?;
-                let active = self.ensure_active_runtime(&session).await?;
-                let runtime = if active.runtime_session_ref.is_some() {
-                    let runtime = self
-                        .persistence
-                        .create_runtime(
-                            &session.session_key,
-                            request
-                                .label
-                                .as_deref()
-                                .unwrap_or(&default_runtime_label(&active.agent_kind, &workspace)),
-                            &active.agent_kind,
-                            &workspace,
-                            true,
-                        )
-                        .await?;
-                    self.activate_runtime(&session, &runtime).await?;
-                    runtime
-                } else {
-                    self.persistence
-                        .update_runtime_workspace(&active.runtime_id, &workspace)
-                        .await?;
-                    let mut updated = active.clone();
-                    updated.workspace_path = workspace.clone();
-                    self.activate_runtime(&session, &updated).await?;
-                    updated
-                };
+                let updated_selector = self
+                    .replace_runtime_selection(&session, &selector.agent_kind, &workspace, None, None, None)
+                    .await?;
+                let _ = self.load_agent_runtimes(&updated_selector).await?;
+                let runtimes = self.list_selector_runtimes(&updated_selector).await?;
 
                 CoreControlResponse {
                     ok: true,
-                    message: format!("当前 workspace 已切换到 `{}`。", runtime.workspace_path),
-                    active_runtime: Some(runtime_summary(&runtime)),
+                    message: if runtimes.is_empty() {
+                        format!("当前 workspace 已切换到 `{}`，暂无可选会话，请执行 `/runtime new`。", workspace)
+                    } else {
+                        format!("当前 workspace 已切换到 `{}`，请重新选择会话。", workspace)
+                    },
+                    selector: Some(selector_summary(&updated_selector)),
+                    active_runtime: None,
+                    runtimes: runtimes
+                        .iter()
+                        .map(|runtime| runtime_summary(runtime, updated_selector.selected_runtime_id.as_deref()))
+                        .collect(),
+                    history_overview: None,
+                }
+            }
+            ControlAction::SetProxy => {
+                let proxy_mode = normalize_proxy_mode(
+                    request
+                        .proxy_mode
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("set_proxy requires proxy_mode"))?,
+                )?;
+                let proxy_url = normalize_proxy_url(
+                    &proxy_mode,
+                    request.proxy_url.as_deref(),
+                    self.config.acp_proxy_url.as_deref(),
+                )?;
+                let updated_selector = self
+                    .replace_runtime_selection(
+                        &session,
+                        &selector.agent_kind,
+                        &selector.workspace_path,
+                        selector.selected_runtime_id.as_deref(),
+                        Some(&proxy_mode),
+                        proxy_url.as_deref(),
+                    )
+                    .await?;
+                let active = self.selected_runtime(&updated_selector).await?;
+                let runtimes = self.list_selector_runtimes(&updated_selector).await?;
+                CoreControlResponse {
+                    ok: true,
+                    message: if let Some(url) = proxy_url.as_deref() {
+                        format!("当前代理模式已切换为 `{}`，代理地址为 `{}`。", proxy_mode, url)
+                    } else {
+                        format!("当前代理模式已切换为 `{}`。", proxy_mode)
+                    },
+                    selector: Some(selector_summary(&updated_selector)),
+                    active_runtime: active
+                        .as_ref()
+                        .map(|runtime| runtime_summary(runtime, updated_selector.selected_runtime_id.as_deref())),
+                    runtimes: runtimes
+                        .iter()
+                        .map(|runtime| runtime_summary(runtime, updated_selector.selected_runtime_id.as_deref()))
+                        .collect(),
+                    history_overview: None,
+                }
+            }
+            ControlAction::StopRuntime => {
+                let turn_id = self
+                    .active_turns
+                    .request_stop(&session.session_key)
+                    .await
+                    .ok_or_else(|| anyhow!("当前没有正在运行的任务。"))?;
+                info!(
+                    "turn stop requested: turn_id={} session_key={}",
+                    turn_id, session.session_key
+                );
+                CoreControlResponse {
+                    ok: true,
+                    message: format!("已请求停止当前任务 `{}`。", turn_id),
+                    selector: Some(selector_summary(&selector)),
+                    active_runtime: self
+                        .selected_runtime(&selector)
+                        .await?
+                        .as_ref()
+                        .map(|runtime| runtime_summary(runtime, selector.selected_runtime_id.as_deref())),
                     runtimes: self
-                        .persistence
-                        .list_runtimes(&session.session_key)
+                        .list_selector_runtimes(&selector)
                         .await?
                         .iter()
-                        .map(runtime_summary)
+                        .map(|runtime| runtime_summary(runtime, selector.selected_runtime_id.as_deref()))
                         .collect(),
+                    history_overview: None,
                 }
             }
         };
@@ -258,99 +505,138 @@ impl CoreService {
         &self,
         request: CoreTurnRequest,
         session: SessionInfo,
+        selection: RuntimeSelection,
         runtime: RuntimeInstance,
     ) -> Result<()> {
         let session_lock = self.session_locks.get(&session.session_key).await;
         let _guard = session_lock.lock().await;
+        self.active_turns
+            .set_starting(&session.session_key, &request.turn_id)
+            .await;
+        info!(
+            "turn start: turn_id={} session_key={} agent={} workspace={}",
+            request.turn_id,
+            session.session_key,
+            runtime.agent_kind,
+            runtime.workspace_path
+        );
+        let result = async {
+            self.persistence.mark_turn_running(&request.turn_id).await?;
 
-        self.persistence.mark_turn_running(&request.turn_id).await?;
+            let prompt = self.build_prompt(&session, &request.text).await;
+            let mut render = TurnRenderState::new(&session);
+            self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                .await?;
 
-        let prompt = self.build_prompt(&session, &request.text).await;
-        let mut render = TurnRenderState::new(&session);
-        self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-            .await?;
+            let mut turn = self
+                .runtime
+                .start_turn(RuntimeTurnRequest {
+                    prompt,
+                    runtime_session_ref: runtime.runtime_session_ref.clone(),
+                    agent_kind: Some(runtime.agent_kind.clone()),
+                    workspace_path: Some(runtime.workspace_path.clone().into()),
+                    proxy_mode: Some(selection.proxy_mode.clone()),
+                    proxy_url: selection.proxy_url.clone(),
+                })
+                .await
+                .context("start runtime turn failed")?;
 
-        let mut turn = self
-            .runtime
-            .start_turn(RuntimeTurnRequest {
-                prompt,
-                runtime_session_ref: runtime.runtime_session_ref.clone(),
-                agent_kind: Some(runtime.agent_kind.clone()),
-                workspace_path: Some(runtime.workspace_path.clone().into()),
-            })
-            .await
-            .context("start runtime turn failed")?;
+            self.active_turns
+                .attach_cancel(&session.session_key, &request.turn_id, turn.cancel.clone())
+                .await;
 
-        while let Some(event) = turn.events.recv().await {
-            match event {
-                RuntimeEvent::Agent(agent_event) => {
-                    let todo_changed = render.apply_event(agent_event);
-                    if todo_changed {
-                        self.publish(&request.turn_id, OutboundSlot::Todo, render.todo_message())
-                            .await?;
+            while let Some(event) = turn.events.recv().await {
+                match event {
+                    RuntimeEvent::Agent(agent_event) => {
+                        let todo_changed = render.apply_event(agent_event);
+                        if todo_changed {
+                            self.publish(&request.turn_id, OutboundSlot::Todo, render.todo_message())
+                                .await?;
+                        }
+                    }
+                    RuntimeEvent::TodoLog(value) => {
+                        let line = json!({
+                            "turn_id": request.turn_id,
+                            "event": value,
+                        });
+                        let _ = append_jsonl(&self.config.todo_event_log_path, &line, "todo log").await;
                     }
                 }
-                RuntimeEvent::TodoLog(value) => {
-                    let line = json!({
-                        "turn_id": request.turn_id,
-                        "event": value,
-                    });
-                    let _ = append_jsonl(&self.config.todo_event_log_path, &line, "todo log").await;
+
+                if render.should_flush(self.config.render_min_update_ms) {
+                    self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                        .await?;
+                    render.mark_flushed();
                 }
             }
 
-            if render.should_flush(self.config.render_min_update_ms) {
-                self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-                    .await?;
-                render.mark_flushed();
+            let completion = match turn.completion.await.context("join runtime turn failed")? {
+                Ok(done) => done,
+                Err(err) => {
+                    let error_text = err.to_string();
+                    error!(
+                        "turn failed: turn_id={} session_key={} error={}",
+                        request.turn_id, session.session_key, error_text
+                    );
+                    render.fail(error_text.clone());
+                    let _ = self
+                        .publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                        .await;
+                    let _ = self
+                        .publish(&request.turn_id, OutboundSlot::Final, render.final_message())
+                        .await;
+                    let _ = self.persistence.fail_turn(&request.turn_id, &error_text).await;
+                    return Err(err);
+                }
+            };
+
+            render.finalize();
+            self.registry
+                .replace_runtime_state(
+                    &session.session_key,
+                    render.runtime_session_ref.clone(),
+                    render.final_assistant_message(),
+                )
+                .await?;
+            self.persistence
+                .update_runtime_state(
+                    &runtime.runtime_id,
+                    render.runtime_session_ref.as_deref(),
+                    render.final_assistant_message().as_deref(),
+                )
+                .await?;
+            self.persistence
+                .complete_turn(&request.turn_id, render.final_assistant_message().as_deref())
+                .await?;
+
+            self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                .await?;
+            self.publish(&request.turn_id, OutboundSlot::Final, render.final_message())
+                .await?;
+
+            if let Some(stop_reason) = completion.stop_reason.as_deref() {
+                info!(
+                    "turn stop_reason: turn_id={} session_key={} stop_reason={}",
+                    request.turn_id, session.session_key, stop_reason
+                );
             }
-        }
-
-        let completion = match turn.completion.await.context("join runtime turn failed")? {
-            Ok(done) => done,
-            Err(err) => {
-                let error_text = err.to_string();
-                render.fail(error_text.clone());
-                let _ = self
-                    .publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-                    .await;
-                let _ = self
-                    .publish(&request.turn_id, OutboundSlot::Final, render.final_message())
-                    .await;
-                let _ = self.persistence.fail_turn(&request.turn_id, &error_text).await;
-                return Err(err);
+            if let Some(stderr_text) = completion.stderr_summary.as_ref() {
+                info!("agent runtime stderr summary: {}", shorten(stderr_text, 400));
             }
-        };
 
-        render.finalize();
-        self.registry
-            .replace_runtime_state(
-                &session.session_key,
-                render.runtime_session_ref.clone(),
-                render.final_assistant_message(),
-            )
-            .await?;
-        self.persistence
-            .update_runtime_state(
-                &runtime.runtime_id,
-                render.runtime_session_ref.as_deref(),
-                render.final_assistant_message().as_deref(),
-            )
-            .await?;
-        self.persistence
-            .complete_turn(&request.turn_id, render.final_assistant_message().as_deref())
-            .await?;
+            info!(
+                "turn completed: turn_id={} session_key={}",
+                request.turn_id, session.session_key
+            );
 
-        self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-            .await?;
-        self.publish(&request.turn_id, OutboundSlot::Final, render.final_message())
-            .await?;
-
-        if let Some(stderr_text) = completion.stderr_summary.as_ref() {
-            info!("agent runtime stderr summary: {}", shorten(stderr_text, 400));
+            Ok(())
         }
+        .await;
 
-        Ok(())
+        self.active_turns
+            .clear(&session.session_key, &request.turn_id)
+            .await;
+        result
     }
 
     async fn build_prompt(&self, session: &SessionInfo, user_text: &str) -> String {
@@ -380,28 +666,6 @@ impl CoreService {
             .await
     }
 
-    async fn ensure_active_runtime(&self, session: &SessionInfo) -> Result<RuntimeInstance> {
-        if let Some(runtime) = self.persistence.get_active_runtime(&session.session_key).await? {
-            return Ok(runtime);
-        }
-
-        let default_workspace = self.config.codex_workdir.to_string_lossy().to_string();
-        let workspace = self.resolve_workspace_path(Some(&default_workspace))?;
-        let agent_kind = self.config.acp_adapter.clone();
-        let runtime = self
-            .persistence
-            .create_runtime(
-                &session.session_key,
-                &default_runtime_label(&agent_kind, &workspace),
-                &agent_kind,
-                &workspace,
-                true,
-            )
-            .await?;
-        self.activate_runtime(session, &runtime).await?;
-        Ok(runtime)
-    }
-
     async fn activate_runtime(&self, session: &SessionInfo, runtime: &RuntimeInstance) -> Result<()> {
         self.persistence
             .set_active_runtime(&session.session_key, &runtime.runtime_id)
@@ -416,18 +680,130 @@ impl CoreService {
         Ok(())
     }
 
+    async fn ensure_runtime_selection(&self, session: &SessionInfo) -> Result<RuntimeSelection> {
+        if let Some(selection) = self.persistence.get_runtime_selection(&session.session_key).await? {
+            return Ok(selection);
+        }
+
+        if let Some(runtime) = self.persistence.get_active_runtime(&session.session_key).await? {
+            self.persistence
+                .upsert_runtime_selection(
+                    &session.session_key,
+                    &runtime.agent_kind,
+                    &runtime.workspace_path,
+                    Some(&runtime.runtime_id),
+                    "default",
+                    self.config.acp_proxy_url.as_deref(),
+                )
+                .await?;
+            return Ok(RuntimeSelection {
+                session_key: session.session_key.clone(),
+                agent_kind: runtime.agent_kind,
+                workspace_path: runtime.workspace_path,
+                selected_runtime_id: Some(runtime.runtime_id),
+                proxy_mode: "default".to_string(),
+                proxy_url: self.config.acp_proxy_url.clone(),
+            });
+        }
+
+        let default_workspace = self.config.codex_workdir.to_string_lossy().to_string();
+        let workspace = self.resolve_workspace_path(Some(&default_workspace))?;
+        let agent_kind = self.config.acp_adapter.clone();
+        self.persistence
+            .upsert_runtime_selection(
+                &session.session_key,
+                &agent_kind,
+                &workspace,
+                None,
+                "default",
+                self.config.acp_proxy_url.as_deref(),
+            )
+            .await?;
+        Ok(RuntimeSelection {
+            session_key: session.session_key.clone(),
+            agent_kind,
+            workspace_path: workspace,
+            selected_runtime_id: None,
+            proxy_mode: "default".to_string(),
+            proxy_url: self.config.acp_proxy_url.clone(),
+        })
+    }
+
+    async fn replace_runtime_selection(
+        &self,
+        session: &SessionInfo,
+        agent_kind: &str,
+        workspace_path: &str,
+        selected_runtime_id: Option<&str>,
+        proxy_mode: Option<&str>,
+        proxy_url: Option<&str>,
+    ) -> Result<RuntimeSelection> {
+        let existing = self.persistence.get_runtime_selection(&session.session_key).await?;
+        let next_proxy_mode = proxy_mode
+            .map(str::to_string)
+            .or_else(|| existing.as_ref().map(|selection| selection.proxy_mode.clone()))
+            .unwrap_or_else(|| "default".to_string());
+        let next_proxy_url = proxy_url
+            .map(str::to_string)
+            .or_else(|| existing.as_ref().and_then(|selection| selection.proxy_url.clone()))
+            .or_else(|| self.config.acp_proxy_url.clone());
+        self.persistence
+            .upsert_runtime_selection(
+                &session.session_key,
+                agent_kind,
+                workspace_path,
+                selected_runtime_id,
+                &next_proxy_mode,
+                next_proxy_url.as_deref(),
+            )
+            .await?;
+        if selected_runtime_id.is_some() {
+            if let Some(runtime_id) = selected_runtime_id {
+                self.persistence
+                    .set_active_runtime(&session.session_key, runtime_id)
+                    .await?;
+            }
+        } else {
+            self.persistence.clear_active_runtime(&session.session_key).await?;
+        }
+        Ok(RuntimeSelection {
+            session_key: session.session_key.clone(),
+            agent_kind: agent_kind.to_string(),
+            workspace_path: workspace_path.to_string(),
+            selected_runtime_id: selected_runtime_id.map(str::to_string),
+            proxy_mode: next_proxy_mode,
+            proxy_url: next_proxy_url,
+        })
+    }
+
+    async fn selected_runtime(&self, selector: &RuntimeSelection) -> Result<Option<RuntimeInstance>> {
+        match selector.selected_runtime_id.as_deref() {
+            Some(runtime_id) => self.persistence.get_runtime(runtime_id).await,
+            None => Ok(None),
+        }
+    }
+
+    async fn list_selector_runtimes(&self, selector: &RuntimeSelection) -> Result<Vec<RuntimeInstance>> {
+        let scope_key = runtime_scope_key(&selector.agent_kind, &selector.workspace_path);
+        let mut runtimes = self.persistence.list_runtimes(&scope_key).await?;
+        for runtime in &mut runtimes {
+            runtime.is_active = selector.selected_runtime_id.as_deref() == Some(runtime.runtime_id.as_str());
+        }
+        Ok(runtimes)
+    }
+
     fn resolve_workspace_path(&self, candidate: Option<&str>) -> Result<String> {
         let default_workspace = self.config.codex_workdir.to_string_lossy().to_string();
         let raw = candidate
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or(default_workspace.as_str());
-        let path = std::path::PathBuf::from(raw);
+        let path = expand_workspace_input(raw)?;
         let canonical = path
             .canonicalize()
-            .with_context(|| format!("workspace does not exist: {}", raw))?;
+            .with_context(|| format!("workspace path not found: {}", raw))?;
         if !canonical.is_dir() {
-            anyhow::bail!("workspace is not a directory: {}", canonical.display());
+            anyhow::bail!("workspace path is not a directory: {}", canonical.display());
         }
         Ok(canonical.to_string_lossy().to_string())
     }
@@ -435,47 +811,167 @@ impl CoreService {
     fn resolve_runtime_load_workspace(
         &self,
         workspace_path: Option<&str>,
-        active: &RuntimeInstance,
+        current_workspace: &str,
     ) -> Result<String> {
         match workspace_path {
             Some(value) => self.resolve_workspace_path(Some(value)),
-            None => self.resolve_workspace_path(Some(&active.workspace_path)),
+            None => self.resolve_workspace_path(Some(current_workspace)),
         }
     }
 
-    async fn load_claude_runtimes(&self, session_key: &str, workspace_path: &str) -> Result<usize> {
-        let workspace = PathBuf::from(workspace_path);
-        let discovered = self.discover_claude_sessions(&workspace).await?;
-        let mut imported = 0usize;
+    async fn load_agent_runtimes(&self, selector: &RuntimeSelection) -> Result<usize> {
+        let scope_key = runtime_scope_key(&selector.agent_kind, &selector.workspace_path);
+        match selector.agent_kind.as_str() {
+            "claude_code" => self.load_claude_runtimes(&scope_key, selector).await,
+            "codex" => self.load_codex_runtimes(&scope_key, selector).await,
+            other => Err(anyhow!("unsupported agent kind: {}", other)),
+        }
+    }
 
+    async fn load_claude_runtimes(&self, scope_key: &str, selector: &RuntimeSelection) -> Result<usize> {
+        let workspace = PathBuf::from(&selector.workspace_path);
+        let discovered = match self
+            .discover_sessions_via_runtime(selector)
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(err) if crate::agent::runtime::is_list_sessions_unsupported_error(&err) => {
+                self.discover_claude_sessions(&workspace).await?
+            }
+            Err(err) => return Err(err),
+        };
+        self.import_discovered_runtimes(scope_key, "claude_code", &discovered)
+            .await
+    }
+
+    async fn load_codex_runtimes(&self, scope_key: &str, selector: &RuntimeSelection) -> Result<usize> {
+        let workspace = PathBuf::from(&selector.workspace_path);
+        let discovered = match self.discover_sessions_via_runtime(selector).await {
+            Ok(sessions) => sessions,
+            Err(err) if crate::agent::runtime::is_list_sessions_unsupported_error(&err) => {
+                self.discover_codex_sessions(&workspace).await?
+            }
+            Err(err) => return Err(err),
+        };
+        self.import_discovered_runtimes(scope_key, "codex", &discovered)
+            .await
+    }
+
+    async fn discover_sessions_via_runtime(
+        &self,
+        selector: &RuntimeSelection,
+    ) -> Result<Vec<DiscoveredRuntimeSession>> {
+        let sessions = self
+            .runtime
+            .list_sessions(crate::agent::runtime::RuntimeSessionQuery {
+                agent_kind: Some(selector.agent_kind.clone()),
+                workspace_path: PathBuf::from(&selector.workspace_path),
+                proxy_mode: Some(selector.proxy_mode.clone()),
+                proxy_url: selector
+                    .proxy_url
+                    .clone()
+                    .or_else(|| self.config.acp_proxy_url.clone()),
+            })
+            .await?;
+        Ok(sessions
+            .into_iter()
+            .map(|session| DiscoveredRuntimeSession {
+                runtime_session_ref: session.runtime_session_ref,
+                workspace_path: session.workspace_path,
+                prompt_preview: session.title,
+                tag: None,
+                modified_at: 0,
+            })
+            .collect())
+    }
+
+    async fn import_discovered_runtimes(
+        &self,
+        scope_key: &str,
+        agent_kind: &str,
+        discovered: &[DiscoveredRuntimeSession],
+    ) -> Result<usize> {
+        let mut imported = 0usize;
         for session in discovered {
             self.persistence
                 .import_runtime(
-                    session_key,
-                    &imported_runtime_label(&session),
-                    "claude_code",
+                    scope_key,
+                    &imported_runtime_label(agent_kind, session),
+                    agent_kind,
                     &session.workspace_path,
                     &session.runtime_session_ref,
-                    session.git_branch.as_deref(),
-                    session.first_prompt.as_deref(),
+                    session.tag.as_deref(),
+                    session.prompt_preview.as_deref(),
                     false,
                 )
                 .await?;
             imported += 1;
         }
-
         Ok(imported)
     }
 
     async fn discover_claude_sessions(
         &self,
         workspace_path: &Path,
-    ) -> Result<Vec<ImportedClaudeSession>> {
+    ) -> Result<Vec<DiscoveredRuntimeSession>> {
         let claude_home = self.config.claude_home_dir.clone();
         let workspace_path = workspace_path.to_path_buf();
         tokio::task::spawn_blocking(move || discover_claude_sessions(&claude_home, &workspace_path))
             .await
             .context("join claude session discovery task failed")?
+    }
+
+    async fn discover_codex_sessions(
+        &self,
+        workspace_path: &Path,
+    ) -> Result<Vec<DiscoveredRuntimeSession>> {
+        let codex_home = self.config.codex_home_dir.clone();
+        let workspace_path = workspace_path.to_path_buf();
+        tokio::task::spawn_blocking(move || discover_codex_sessions(&codex_home, &workspace_path))
+            .await
+            .context("join codex session discovery task failed")?
+    }
+
+    async fn load_runtime_history_overview(
+        &self,
+        selector: &RuntimeSelection,
+        runtime: &RuntimeInstance,
+    ) -> Result<Option<crate::protocol::RuntimeHistoryOverview>> {
+        let Some(runtime_session_ref) = runtime.runtime_session_ref.clone() else {
+            return Ok(None);
+        };
+        let history = self
+            .runtime
+            .load_history(crate::agent::runtime::RuntimeHistoryQuery {
+                agent_kind: Some(selector.agent_kind.clone()),
+                workspace_path: PathBuf::from(&selector.workspace_path),
+                runtime_session_ref: runtime_session_ref.clone(),
+                proxy_mode: Some(selector.proxy_mode.clone()),
+                proxy_url: selector
+                    .proxy_url
+                    .clone()
+                    .or_else(|| self.config.acp_proxy_url.clone()),
+            })
+            .await?;
+        let turns = history
+            .into_iter()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|turn| crate::protocol::RuntimeHistoryTurn {
+                user_text: shorten_history_line(&turn.user_text),
+                assistant_text: shorten_history_line(&turn.assistant_text),
+            })
+            .collect::<Vec<_>>();
+        if turns.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(crate::protocol::RuntimeHistoryOverview {
+            runtime_session_ref,
+            turns,
+        }))
     }
 }
 
@@ -487,7 +983,100 @@ fn default_runtime_label(agent_kind: &str, workspace_path: &str) -> String {
     format!("{}-{}", agent_kind, leaf)
 }
 
-fn runtime_summary(runtime: &RuntimeInstance) -> RuntimeSummary {
+fn runtime_scope_key(agent_kind: &str, workspace_path: &str) -> String {
+    format!("scope:{}:{}", agent_kind, workspace_path)
+}
+
+fn expand_workspace_input(raw: &str) -> Result<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("workspace path is empty");
+    }
+
+    if trimmed == "~" {
+        return home_dir().map_err(|_| anyhow!("cannot resolve `~`: HOME is not set"));
+    }
+
+    if let Some(stripped) = trimmed.strip_prefix("~/") {
+        return home_dir()
+            .map(|home| home.join(stripped))
+            .map_err(|_| anyhow!("cannot resolve `~/{}`: HOME is not set", stripped));
+    }
+
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+
+    Ok(std::env::current_dir()
+        .context("failed to resolve current working directory for relative workspace path")?
+        .join(path))
+}
+
+fn home_dir() -> Result<PathBuf> {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set")
+}
+
+fn normalize_agent_kind(raw: &str) -> Result<String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude_code" | "claude-code" => Ok("claude_code".to_string()),
+        "codex" => Ok("codex".to_string()),
+        other => Err(anyhow!("unsupported agent kind: {}", other)),
+    }
+}
+
+fn normalize_proxy_mode(raw: &str) -> Result<String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "default" | "auto" => Ok("default".to_string()),
+        "on" | "enable" | "enabled" => Ok("on".to_string()),
+        "off" | "disable" | "disabled" => Ok("off".to_string()),
+        other => Err(anyhow!("unsupported proxy mode: {}", other)),
+    }
+}
+
+fn normalize_proxy_url(
+    proxy_mode: &str,
+    request_proxy_url: Option<&str>,
+    default_proxy_url: Option<&str>,
+) -> Result<Option<String>> {
+    let cleaned = request_proxy_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    match proxy_mode {
+        "off" => Ok(None),
+        "on" => Ok(Some(
+            cleaned
+                .or_else(|| default_proxy_url.map(str::to_string))
+                .ok_or_else(|| anyhow!("proxy mode `on` requires proxy url or ACP_PROXY_URL/ALL_PROXY/HTTPS_PROXY/HTTP_PROXY"))?,
+        )),
+        "default" => Ok(cleaned.or_else(|| default_proxy_url.map(str::to_string))),
+        other => Err(anyhow!("unsupported proxy mode: {}", other)),
+    }
+}
+
+fn shorten_history_line(value: &str) -> String {
+    let first = value
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    shorten(first, 120)
+}
+
+fn selector_summary(selection: &RuntimeSelection) -> RuntimeSelectorSummary {
+    RuntimeSelectorSummary {
+        agent_kind: selection.agent_kind.clone(),
+        workspace_path: selection.workspace_path.clone(),
+        has_selected_runtime: selection.selected_runtime_id.is_some(),
+        proxy_mode: selection.proxy_mode.clone(),
+        proxy_url: selection.proxy_url.clone(),
+    }
+}
+
+fn runtime_summary(runtime: &RuntimeInstance, selected_runtime_id: Option<&str>) -> RuntimeSummary {
     RuntimeSummary {
         runtime_id: runtime.runtime_id.clone(),
         label: runtime.label.clone(),
@@ -497,23 +1086,23 @@ fn runtime_summary(runtime: &RuntimeInstance) -> RuntimeSummary {
         tag: runtime.tag.clone(),
         prompt_preview: runtime.prompt_preview.clone(),
         has_runtime_session_ref: runtime.runtime_session_ref.is_some(),
-        is_active: runtime.is_active,
+        is_active: selected_runtime_id == Some(runtime.runtime_id.as_str()),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ImportedClaudeSession {
+struct DiscoveredRuntimeSession {
     runtime_session_ref: String,
     workspace_path: String,
-    first_prompt: Option<String>,
-    git_branch: Option<String>,
+    prompt_preview: Option<String>,
+    tag: Option<String>,
     modified_at: i64,
 }
 
 fn discover_claude_sessions(
     claude_home: &Path,
     workspace_path: &Path,
-) -> Result<Vec<ImportedClaudeSession>> {
+) -> Result<Vec<DiscoveredRuntimeSession>> {
     let mut dirs = Vec::new();
     let mut seen_dirs = HashSet::new();
 
@@ -605,7 +1194,7 @@ fn add_private_prefix(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn load_sessions_from_index(dir: &Path) -> Result<Vec<ImportedClaudeSession>> {
+fn load_sessions_from_index(dir: &Path) -> Result<Vec<DiscoveredRuntimeSession>> {
     let index_path = dir.join("sessions-index.json");
     if !index_path.exists() {
         return Ok(Vec::new());
@@ -635,14 +1224,14 @@ fn load_sessions_from_index(dir: &Path) -> Result<Vec<ImportedClaudeSession>> {
             .and_then(Value::as_i64)
             .map(|value| value / 1000)
             .unwrap_or(0);
-        sessions.push(ImportedClaudeSession {
+        sessions.push(DiscoveredRuntimeSession {
             runtime_session_ref: session_id.to_string(),
             workspace_path,
-            first_prompt: entry
+            prompt_preview: entry
                 .get("firstPrompt")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            git_branch: entry
+            tag: entry
                 .get("gitBranch")
                 .and_then(Value::as_str)
                 .map(str::to_string),
@@ -652,7 +1241,7 @@ fn load_sessions_from_index(dir: &Path) -> Result<Vec<ImportedClaudeSession>> {
     Ok(sessions)
 }
 
-fn load_sessions_from_jsonl_dir(dir: &Path) -> Result<Vec<ImportedClaudeSession>> {
+fn load_sessions_from_jsonl_dir(dir: &Path) -> Result<Vec<DiscoveredRuntimeSession>> {
     let mut sessions = Vec::new();
     for entry in std::fs::read_dir(dir).with_context(|| format!("read claude dir failed: {:?}", dir))? {
         let entry = entry?;
@@ -667,7 +1256,7 @@ fn load_sessions_from_jsonl_dir(dir: &Path) -> Result<Vec<ImportedClaudeSession>
     Ok(sessions)
 }
 
-fn load_session_from_jsonl(path: &Path) -> Result<Option<ImportedClaudeSession>> {
+fn load_session_from_jsonl(path: &Path) -> Result<Option<DiscoveredRuntimeSession>> {
     let file = File::open(path).with_context(|| format!("open claude session failed: {:?}", path))?;
     let reader = BufReader::new(file);
     let modified_at = std::fs::metadata(path)
@@ -712,11 +1301,11 @@ fn load_session_from_jsonl(path: &Path) -> Result<Option<ImportedClaudeSession>>
         return Ok(None);
     };
 
-    Ok(Some(ImportedClaudeSession {
+    Ok(Some(DiscoveredRuntimeSession {
         runtime_session_ref,
         workspace_path: workspace_path.unwrap_or_default(),
-        first_prompt,
-        git_branch,
+        prompt_preview: first_prompt,
+        tag: git_branch,
         modified_at,
     }))
 }
@@ -737,8 +1326,100 @@ fn extract_first_prompt(value: &Value) -> Option<String> {
         })
 }
 
-fn imported_runtime_label(session: &ImportedClaudeSession) -> String {
-    format!("claude-{}", shorten(&session.runtime_session_ref, 8))
+fn discover_codex_sessions(
+    codex_home: &Path,
+    workspace_path: &Path,
+) -> Result<Vec<DiscoveredRuntimeSession>> {
+    let mut sessions = load_codex_sessions_from_sqlite(codex_home, workspace_path)?;
+    sessions.sort_by(|a, b| {
+        b.modified_at
+            .cmp(&a.modified_at)
+            .then_with(|| a.runtime_session_ref.cmp(&b.runtime_session_ref))
+    });
+    Ok(sessions)
+}
+
+fn load_codex_sessions_from_sqlite(
+    codex_home: &Path,
+    workspace_path: &Path,
+) -> Result<Vec<DiscoveredRuntimeSession>> {
+    let db_path = codex_home.join("state_5.sqlite");
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let workspace_variants = workspace_variants(workspace_path);
+    let conn = rusqlite::Connection::open(&db_path)
+        .with_context(|| format!("open codex sqlite failed: {:?}", db_path))?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, cwd, title, updated_at, git_branch, first_user_message
+        FROM threads
+        WHERE archived = 0
+        ORDER BY updated_at DESC
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(DiscoveredRuntimeSession {
+            runtime_session_ref: row.get(0)?,
+            workspace_path: row.get(1)?,
+            prompt_preview: {
+                let title: Option<String> = row.get(2)?;
+                let first_user_message: Option<String> = row.get(5)?;
+                first_user_message
+                    .filter(|value| !value.trim().is_empty())
+                    .or_else(|| title.filter(|value| !value.trim().is_empty()))
+            },
+            modified_at: row.get(3)?,
+            tag: row.get(4)?,
+        })
+    })?;
+
+    let mut sessions = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let session = row?;
+        if !workspace_variants_match(&workspace_variants, &session.workspace_path) {
+            continue;
+        }
+        if seen.insert(session.runtime_session_ref.clone()) {
+            sessions.push(session);
+        }
+    }
+    Ok(sessions)
+}
+
+fn workspace_variants(path: &Path) -> HashSet<String> {
+    let mut variants = HashSet::new();
+    let mut candidates = vec![path.to_path_buf()];
+    if let Ok(canonical) = path.canonicalize() {
+        candidates.push(canonical);
+    }
+
+    for candidate in candidates {
+        variants.insert(candidate.to_string_lossy().to_string());
+        if let Some(stripped) = strip_private_prefix(&candidate) {
+            variants.insert(stripped.to_string_lossy().to_string());
+        }
+        if let Some(prefixed) = add_private_prefix(&candidate) {
+            variants.insert(prefixed.to_string_lossy().to_string());
+        }
+    }
+    variants
+}
+
+fn workspace_variants_match(expected: &HashSet<String>, candidate: &str) -> bool {
+    let candidate_path = PathBuf::from(candidate);
+    let candidate_variants = workspace_variants(&candidate_path);
+    candidate_variants.iter().any(|value| expected.contains(value))
+}
+
+fn imported_runtime_label(agent_kind: &str, session: &DiscoveredRuntimeSession) -> String {
+    let short_agent = match agent_kind {
+        "claude_code" => "claude",
+        other => other,
+    };
+    format!("{}-{}", short_agent, shorten(&session.runtime_session_ref, 8))
 }
 
 fn runtime_matches_selector(runtime: &RuntimeInstance, selector: &str) -> bool {
@@ -753,13 +1434,10 @@ fn runtime_matches_selector(runtime: &RuntimeInstance, selector: &str) -> bool {
 }
 
 struct TurnRenderState {
-    session_id: String,
-    session_key: String,
     status: &'static str,
     progress_excerpt: String,
     final_text: Option<String>,
     runtime_session_ref: Option<String>,
-    usage: Option<Value>,
     error: Option<String>,
     todo_items: Vec<TodoEntry>,
     active_tool_count: usize,
@@ -771,13 +1449,10 @@ struct TurnRenderState {
 impl TurnRenderState {
     fn new(session: &SessionInfo) -> Self {
         Self {
-            session_id: session.session_id.clone(),
-            session_key: session.session_key.clone(),
             status: "running",
             progress_excerpt: String::new(),
             final_text: None,
             runtime_session_ref: session.runtime_session_ref.clone(),
-            usage: None,
             error: None,
             todo_items: Vec::new(),
             active_tool_count: 0,
@@ -836,9 +1511,7 @@ impl TurnRenderState {
                 self.tool_event_icon = "🧭";
                 self.tool_event_note = format!("计划已刷新，共 {} 项", self.todo_items.len());
             }
-            NormalizedAgentEvent::Usage(usage) => {
-                self.usage = Some(usage);
-            }
+            NormalizedAgentEvent::Usage(_) => {}
         }
         self.todo_items != prev_todos
     }
@@ -874,46 +1547,17 @@ impl TurnRenderState {
     fn progress_message(&self) -> OutboundMessage {
         let mut blocks = vec![
             CardBlock::Markdown {
-                text: format!(
-                    "**{} {}**\n`session {}`",
-                    progress_status_icon(self.status),
-                    progress_status_label(self.status),
-                    self.session_id
-                ),
+                text: format!("**{} {}**", progress_status_icon(self.status), progress_status_label(self.status)),
             },
             CardBlock::Markdown {
-                text: format!(
-                    "{} {}\n{} 当前活跃工具数：`{}`",
-                    self.tool_event_icon,
-                    self.tool_event_note,
-                    progress_status_icon(self.status),
-                    self.active_tool_count
-                ),
+                text: format!("{} {}", self.tool_event_icon, self.tool_event_note),
             },
         ];
-
-        if let Some(runtime_session_ref) = self.runtime_session_ref.as_ref() {
-            blocks.push(CardBlock::Markdown {
-                text: format!("🧵 已建立 runtime session：`{}`", shorten(runtime_session_ref, 48)),
-            });
-        }
 
         if self.status == "running" && !self.progress_excerpt.trim().is_empty() {
             blocks.push(CardBlock::Divider);
             blocks.push(CardBlock::Markdown {
                 text: format!("📌 **最近输出摘录**\n\n{}", format_output_excerpt(&self.progress_excerpt, 700)),
-            });
-        } else if self.status == "completed" && self.error.is_none() {
-            blocks.push(CardBlock::Divider);
-            blocks.push(CardBlock::Markdown {
-                text: "✅ 最终结果已经单独整理到绿色卡片，这张灰卡不再重复正文。".to_string(),
-            });
-        }
-
-        if let Some(usage) = self.usage.as_ref() {
-            blocks.push(CardBlock::Divider);
-            blocks.push(CardBlock::Markdown {
-                text: format!("📊 **本轮资源消耗**\n{}", summarize_usage(usage)),
             });
         }
 
@@ -923,11 +1567,6 @@ impl TurnRenderState {
                 text: format!("⚠️ **异常信息**\n{}", shorten(error_text, 800)),
             });
         }
-
-        blocks.push(CardBlock::Divider);
-        blocks.push(CardBlock::Markdown {
-            text: "💡 这张卡片会持续更新，用来表示 agent 仍在运行；最终答案会单独发一张绿色结果卡片。".to_string(),
-        });
 
         card_message(
             "Codex 持续运行中",
@@ -981,32 +1620,18 @@ impl TurnRenderState {
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| "暂未拿到可展示的最终结果。".to_string())
         };
-        let summary = summarize_final_text(&text);
 
         card_message(
-            "最终结果",
+            if self.status == "failed" { "⚠️ 运行异常" } else { "✅ 本轮已结束" },
             if self.status == "failed" {
                 CardTheme::Red
             } else {
                 CardTheme::Green
             },
             false,
-            vec![
-                CardBlock::Markdown {
-                    text: format!("✅ **本轮已结束**\n`session {}`", self.session_id),
-                },
-                CardBlock::Markdown {
-                    text: format!("📌 **结论摘要**\n{}", summary),
-                },
-                CardBlock::Divider,
-                CardBlock::Markdown {
-                    text: format!("📝 **最终输出**\n\n{}", shorten(&text, 2200)),
-                },
-                CardBlock::Divider,
-                CardBlock::Markdown {
-                    text: format!("🔖 `session_key={}`", shorten(&self.session_key, 120)),
-                },
-            ],
+            vec![CardBlock::Markdown {
+                text: shorten(&text, 2200),
+            }],
         )
     }
 }
@@ -1083,36 +1708,6 @@ fn format_output_excerpt(text: &str, max_chars: usize) -> String {
     shorten(&compact, max_chars)
 }
 
-fn summarize_usage(usage: &Value) -> String {
-    if let Some(obj) = usage.as_object() {
-        let mut lines = Vec::new();
-        for key in ["input_tokens", "output_tokens", "total_tokens"] {
-            if let Some(value) = obj.get(key) {
-                lines.push(format!("• `{}`: {}", key, value));
-            }
-        }
-        if !lines.is_empty() {
-            return lines.join("\n");
-        }
-    }
-    format!("```json\n{}\n```", usage)
-}
-
-fn summarize_final_text(text: &str) -> String {
-    let lines = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(3)
-        .map(|line| format!("• {}", shorten(line, 120)))
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        "• 本轮没有提取到可概括的结论".to_string()
-    } else {
-        lines.join("\n")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{path::{Path, PathBuf}, sync::Arc};
@@ -1144,13 +1739,22 @@ mod tests {
     struct MockRuntime {
         captured: Arc<Mutex<Vec<RuntimeTurnRequest>>>,
         events: Vec<RuntimeEvent>,
+        sessions: Vec<crate::agent::runtime::RuntimeSessionListing>,
+        history: Vec<crate::agent::runtime::RuntimeHistoryTurn>,
     }
+
+    #[derive(Clone, Default)]
+    struct InterruptibleMockRuntime;
+
+    #[derive(Clone, Default)]
+    struct SlowInterruptibleMockRuntime;
 
     #[async_trait]
     impl AgentRuntime for MockRuntime {
         async fn start_turn(&self, request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
             self.captured.lock().await.push(request);
             let (tx, rx) = mpsc::unbounded_channel();
+            let (cancel, _cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
             let events = self.events.clone();
             tokio::spawn(async move {
                 for event in events {
@@ -1158,7 +1762,24 @@ mod tests {
                 }
             });
             let completion = tokio::spawn(async { Ok(RuntimeCompletion::default()) });
-            Ok(RuntimeTurn { events: rx, completion })
+            Ok(RuntimeTurn { events: rx, completion, cancel })
+        }
+
+        async fn list_sessions(
+            &self,
+            _query: crate::agent::runtime::RuntimeSessionQuery,
+        ) -> Result<Vec<crate::agent::runtime::RuntimeSessionListing>> {
+            if self.sessions.is_empty() {
+                return Err(anyhow!(crate::agent::runtime::LIST_SESSIONS_UNSUPPORTED_ERROR_TEXT));
+            }
+            Ok(self.sessions.clone())
+        }
+
+        async fn load_history(
+            &self,
+            _query: crate::agent::runtime::RuntimeHistoryQuery,
+        ) -> Result<Vec<crate::agent::runtime::RuntimeHistoryTurn>> {
+            Ok(self.history.clone())
         }
 
         fn name(&self) -> &'static str {
@@ -1166,14 +1787,56 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl AgentRuntime for InterruptibleMockRuntime {
+        async fn start_turn(&self, _request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (cancel, mut cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
+            let completion = tokio::spawn(async move {
+                let _ = cancel_rx.changed().await;
+                drop(tx);
+                Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT))
+            });
+            Ok(RuntimeTurn { events: rx, completion, cancel })
+        }
+
+        fn name(&self) -> &'static str {
+            "interruptible-mock"
+        }
+    }
+
+    #[async_trait]
+    impl AgentRuntime for SlowInterruptibleMockRuntime {
+        async fn start_turn(&self, _request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (cancel, mut cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
+            let completion = tokio::spawn(async move {
+                let _ = cancel_rx.changed().await;
+                drop(tx);
+                Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT))
+            });
+            Ok(RuntimeTurn { events: rx, completion, cancel })
+        }
+
+        fn name(&self) -> &'static str {
+            "slow-interruptible-mock"
+        }
+    }
+
     fn test_config() -> Arc<Config> {
         test_config_with_paths(
             PathBuf::from("."),
             PathBuf::from(format!("/tmp/remoteagent-claude-{}", uuid::Uuid::new_v4())),
+            PathBuf::from(format!("/tmp/remoteagent-codex-{}", uuid::Uuid::new_v4())),
         )
     }
 
-    fn test_config_with_paths(codex_workdir: PathBuf, claude_home_dir: PathBuf) -> Arc<Config> {
+    fn test_config_with_paths(
+        codex_workdir: PathBuf,
+        claude_home_dir: PathBuf,
+        codex_home_dir: PathBuf,
+    ) -> Arc<Config> {
         Arc::new(Config {
             core_bind: "127.0.0.1:39001".parse().unwrap(),
             core_ingest_token: None,
@@ -1181,6 +1844,8 @@ mod tests {
             gateway_event_token: None,
             state_db_path: PathBuf::from(format!("/tmp/remoteagent-service-{}.db", uuid::Uuid::new_v4())),
             claude_home_dir,
+            codex_home_dir,
+            acp_proxy_url: Some("http://127.0.0.1:7890".to_string()),
             codex_bin: "codex".to_string(),
             codex_workdir,
             codex_model: None,
@@ -1223,10 +1888,28 @@ mod tests {
                 RuntimeEvent::Agent(NormalizedAgentEvent::AssistantMessage("Final answer".to_string())),
                 RuntimeEvent::Agent(NormalizedAgentEvent::TurnCompleted),
             ],
+            sessions: Vec::new(),
+            history: Vec::new(),
         });
         let service = build_service(runtime, sink.clone()).await;
         let session = service.registry.resolve("gateway:test", None).await.unwrap();
-        let runtime = service.ensure_active_runtime(&session).await.unwrap();
+        let workspace = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let runtime = service
+            .persistence
+            .create_runtime(
+                &runtime_scope_key("codex", &workspace),
+                "codex-test",
+                "codex",
+                &workspace,
+                false,
+            )
+            .await
+            .unwrap();
+        let _ = service
+            .replace_runtime_selection(&session, "codex", &workspace, Some(&runtime.runtime_id), None, None)
+            .await
+            .unwrap();
+        service.activate_runtime(&session, &runtime).await.unwrap();
         service
             .persistence
             .create_turn("turn_1", &session.session_id, "hello")
@@ -1242,6 +1925,7 @@ mod tests {
                     text: "hello".to_string(),
                 },
                 session.clone(),
+                service.ensure_runtime_selection(&session).await.unwrap(),
                 runtime,
             )
             .await
@@ -1275,6 +1959,8 @@ mod tests {
                 RuntimeEvent::Agent(NormalizedAgentEvent::AssistantMessage("child reply".to_string())),
                 RuntimeEvent::Agent(NormalizedAgentEvent::TurnCompleted),
             ],
+            sessions: Vec::new(),
+            history: Vec::new(),
         });
         let service = build_service(runtime, sink).await;
 
@@ -1294,7 +1980,23 @@ mod tests {
             .resolve("session:child", Some("session:parent"))
             .await
             .unwrap();
-        let runtime = service.ensure_active_runtime(&child).await.unwrap();
+        let workspace = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let runtime = service
+            .persistence
+            .create_runtime(
+                &runtime_scope_key("codex", &workspace),
+                "codex-child",
+                "codex",
+                &workspace,
+                false,
+            )
+            .await
+            .unwrap();
+        let _ = service
+            .replace_runtime_selection(&child, "codex", &workspace, Some(&runtime.runtime_id), None, None)
+            .await
+            .unwrap();
+        service.activate_runtime(&child, &runtime).await.unwrap();
         service
             .persistence
             .create_turn("turn_2", &child.session_id, "follow up")
@@ -1310,6 +2012,7 @@ mod tests {
                     text: "follow up".to_string(),
                 },
                 child,
+                service.ensure_runtime_selection(&service.registry.get_by_session_key("session:child").await.unwrap()).await.unwrap(),
                 runtime,
             )
             .await
@@ -1352,7 +2055,9 @@ mod tests {
                 assert_eq!(card.theme, CardTheme::Grey);
                 let body = format!("{:?}", card.blocks);
                 assert!(body.contains("🔄"));
-                assert!(body.contains("🧵"));
+                assert!(body.contains("📌"));
+                assert!(!body.contains("session"));
+                assert!(!body.contains("runtime session"));
             }
             _ => panic!("progress should be card"),
         }
@@ -1372,10 +2077,12 @@ mod tests {
         match final_message {
             OutboundMessage::Card { card } => {
                 assert_eq!(card.theme, CardTheme::Green);
+                assert_eq!(card.title, "✅ 本轮已结束");
                 let body = format!("{:?}", card.blocks);
-                assert!(body.contains("✅"));
-                assert!(body.contains("📌"));
-                assert!(body.contains("📝"));
+                assert!(body.contains("line one"));
+                assert!(!body.contains("📌"));
+                assert!(!body.contains("📝"));
+                assert!(!body.contains("session"));
             }
             _ => panic!("final should be card"),
         }
@@ -1399,7 +2106,8 @@ mod tests {
             OutboundMessage::Card { card } => {
                 let body = format!("{:?}", card.blocks);
                 assert!(!body.contains("final answer body"));
-                assert!(body.contains("绿色结果卡片"));
+                assert!(!body.contains("绿色结果卡片"));
+                assert!(!body.contains("session"));
             }
             _ => panic!("progress should be card"),
         }
@@ -1411,6 +2119,8 @@ mod tests {
         let runtime = Arc::new(MockRuntime {
             captured: Arc::new(Mutex::new(Vec::new())),
             events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
         });
         let service = build_service(runtime, sink).await;
 
@@ -1423,10 +2133,13 @@ mod tests {
                 workspace_path: None,
                 label: None,
                 agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
-        assert!(show.active_runtime.is_some());
+        assert!(show.selector.is_some());
+        assert!(show.active_runtime.is_none());
 
         let current_dir = std::env::current_dir().unwrap();
         let created = service
@@ -1438,6 +2151,8 @@ mod tests {
                 workspace_path: Some(current_dir.to_string_lossy().to_string()),
                 label: Some("claude-alt".to_string()),
                 agent_kind: Some("claude_code".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
@@ -1452,6 +2167,8 @@ mod tests {
                 workspace_path: None,
                 label: None,
                 agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
@@ -1465,6 +2182,8 @@ mod tests {
         let runtime = Arc::new(MockRuntime {
             captured: Arc::new(Mutex::new(Vec::new())),
             events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
         });
         let service = build_service(runtime, sink).await;
         let current_dir = std::env::current_dir().unwrap();
@@ -1477,6 +2196,8 @@ mod tests {
                 workspace_path: Some(current_dir.to_string_lossy().to_string()),
                 label: Some("claude-short".to_string()),
                 agent_kind: Some("claude_code".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
@@ -1499,6 +2220,8 @@ mod tests {
                 workspace_path: None,
                 label: None,
                 agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
@@ -1507,11 +2230,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn switch_runtime_returns_history_overview() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: vec![
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第一个问题".to_string(),
+                    assistant_text: "第一个回答".to_string(),
+                },
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第二个问题".to_string(),
+                    assistant_text: "第二个回答".to_string(),
+                },
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第三个问题".to_string(),
+                    assistant_text: "第三个回答".to_string(),
+                },
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第四个问题".to_string(),
+                    assistant_text: "第四个回答".to_string(),
+                },
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第五个问题".to_string(),
+                    assistant_text: "第五个回答".to_string(),
+                },
+                crate::agent::runtime::RuntimeHistoryTurn {
+                    user_text: "第六个问题".to_string(),
+                    assistant_text: "第六个回答".to_string(),
+                },
+            ],
+        });
+        let service = build_service(runtime, sink).await;
+        let current_dir = std::env::current_dir().unwrap();
+        let created = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:history".to_string(),
+                parent_session_key: None,
+                action: ControlAction::CreateRuntime,
+                runtime_selector: None,
+                workspace_path: Some(current_dir.to_string_lossy().to_string()),
+                label: Some("codex-history".to_string()),
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        let runtime_id = created.active_runtime.as_ref().unwrap().runtime_id.clone();
+        service
+            .persistence
+            .update_runtime_state(&runtime_id, Some("sess-history"), None)
+            .await
+            .unwrap();
+
+        let switched = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:history".to_string(),
+                parent_session_key: None,
+                action: ControlAction::SwitchRuntime,
+                runtime_selector: Some(runtime_id),
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        let history = switched.history_overview.expect("history overview missing");
+        assert_eq!(history.runtime_session_ref, "sess-history");
+        assert_eq!(history.turns.len(), 5);
+        assert_eq!(history.turns[0].user_text, "第二个问题");
+        assert_eq!(history.turns[4].assistant_text, "第六个回答");
+    }
+
+    #[tokio::test]
     async fn control_can_load_claude_runtimes_from_workspace_jsonl() {
         let sink = Arc::new(MockSink::default());
         let runtime = Arc::new(MockRuntime {
             captured: Arc::new(Mutex::new(Vec::new())),
             events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
         });
         let root = PathBuf::from(format!("/tmp/remoteagent-load-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
@@ -1537,10 +2341,24 @@ mod tests {
             "second task",
         );
 
-        let config = test_config_with_paths(workspace.clone(), claude_home);
+        let config = test_config_with_paths(workspace.clone(), claude_home, root.join(".codex"));
         let service = build_service_with_config(runtime, sink, config).await;
         let discovered = service.discover_claude_sessions(&workspace).await.unwrap();
         assert_eq!(discovered.len(), 2);
+        service
+            .handle_control(CoreControlRequest {
+                session_key: "control:load".to_string(),
+                parent_session_key: None,
+                action: ControlAction::UseAgent,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: Some("claude_code".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
         let response = service
             .handle_control(CoreControlRequest {
                 session_key: "control:load".to_string(),
@@ -1550,6 +2368,8 @@ mod tests {
                 workspace_path: Some(workspace.to_string_lossy().to_string()),
                 label: None,
                 agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
             })
             .await
             .unwrap();
@@ -1564,6 +2384,78 @@ mod tests {
             .runtimes
             .iter()
             .any(|runtime| runtime.runtime_session_ref.as_deref() == Some("sess-b")));
+    }
+
+    #[tokio::test]
+    async fn control_prefers_runtime_list_sessions_over_local_fallback() {
+        let sink = Arc::new(MockSink::default());
+        let root = PathBuf::from(format!("/tmp/remoteagent-runtime-list-{}", uuid::Uuid::new_v4()));
+        let workspace = root.join("workspace");
+        let claude_home = root.join(".claude");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let project_dir = claude_home
+            .join("projects")
+            .join(claude_project_dir_name(&workspace));
+        std::fs::create_dir_all(&project_dir).unwrap();
+        write_claude_jsonl(
+            &project_dir.join("sess-local.jsonl"),
+            "sess-local",
+            &workspace,
+            "master",
+            "local fallback session",
+        );
+
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: vec![crate::agent::runtime::RuntimeSessionListing {
+                runtime_session_ref: "sess-acp".to_string(),
+                workspace_path: workspace.to_string_lossy().to_string(),
+                title: Some("acp listed session".to_string()),
+                updated_at: None,
+            }],
+            history: Vec::new(),
+        });
+        let config = test_config_with_paths(workspace.clone(), claude_home, root.join(".codex"));
+        let service = build_service_with_config(runtime, sink, config).await;
+
+        service
+            .handle_control(CoreControlRequest {
+                session_key: "control:runtime-list".to_string(),
+                parent_session_key: None,
+                action: ControlAction::UseAgent,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: Some("claude_code".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:runtime-list".to_string(),
+                parent_session_key: None,
+                action: ControlAction::LoadRuntimes,
+                runtime_selector: None,
+                workspace_path: Some(workspace.to_string_lossy().to_string()),
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response
+            .runtimes
+            .iter()
+            .any(|runtime| runtime.runtime_session_ref.as_deref() == Some("sess-acp")));
+        assert!(!response
+            .runtimes
+            .iter()
+            .any(|runtime| runtime.runtime_session_ref.as_deref() == Some("sess-local")));
     }
 
     #[test]
@@ -1589,7 +2481,236 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].runtime_session_ref, "sess-c");
         assert_eq!(sessions[0].workspace_path, workspace.to_string_lossy().to_string());
-        assert_eq!(sessions[0].git_branch.as_deref(), Some("master"));
+        assert_eq!(sessions[0].tag.as_deref(), Some("master"));
+    }
+
+    #[tokio::test]
+    async fn control_can_load_codex_runtimes_from_state_sqlite() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let root = PathBuf::from(format!("/tmp/remoteagent-codex-load-{}", uuid::Uuid::new_v4()));
+        let workspace = root.join("workspace");
+        let claude_home = root.join(".claude");
+        let codex_home = root.join(".codex");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&codex_home).unwrap();
+        write_codex_state_db(&codex_home.join("state_5.sqlite"), &workspace);
+
+        let config = test_config_with_paths(workspace.clone(), claude_home, codex_home);
+        let service = build_service_with_config(runtime, sink, config).await;
+        let discovered = service.discover_codex_sessions(&workspace).await.unwrap();
+        assert_eq!(discovered.len(), 2);
+        assert_eq!(discovered[0].runtime_session_ref, "codex-b");
+        assert_eq!(discovered[1].runtime_session_ref, "codex-a");
+
+        service
+            .handle_control(CoreControlRequest {
+                session_key: "control:codex-load".to_string(),
+                parent_session_key: None,
+                action: ControlAction::UseAgent,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:codex-load".to_string(),
+                parent_session_key: None,
+                action: ControlAction::LoadRuntimes,
+                runtime_selector: None,
+                workspace_path: Some(workspace.to_string_lossy().to_string()),
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.ok);
+        assert_eq!(response.runtimes.len(), 2);
+        assert!(response
+            .runtimes
+            .iter()
+            .any(|runtime| runtime.runtime_session_ref.as_deref() == Some("codex-a")));
+        assert!(response
+            .runtimes
+            .iter()
+            .any(|runtime| runtime.prompt_preview.as_deref() == Some("first codex task")));
+    }
+
+    #[tokio::test]
+    async fn control_can_update_proxy_mode_for_selector() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let service = build_service(runtime, sink).await;
+
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:proxy".to_string(),
+                parent_session_key: None,
+                action: ControlAction::SetProxy,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: Some("on".to_string()),
+                proxy_url: Some("http://127.0.0.1:8888".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.selector.as_ref().unwrap().proxy_mode, "on");
+        assert_eq!(
+            response.selector.as_ref().unwrap().proxy_url.as_deref(),
+            Some("http://127.0.0.1:8888")
+        );
+    }
+
+    #[tokio::test]
+    async fn control_can_stop_active_turn() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(InterruptibleMockRuntime);
+        let service = build_service(runtime, sink).await;
+        let session = service.registry.resolve("control:stop", None).await.unwrap();
+        let workspace = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let runtime = service
+            .persistence
+            .create_runtime(
+                &runtime_scope_key("codex", &workspace),
+                "codex-stop",
+                "codex",
+                &workspace,
+                false,
+            )
+            .await
+            .unwrap();
+        let _ = service
+            .replace_runtime_selection(&session, "codex", &workspace, Some(&runtime.runtime_id), None, None)
+            .await
+            .unwrap();
+
+        service
+            .accept_turn(CoreTurnRequest {
+                turn_id: "turn_stop".to_string(),
+                session_key: "control:stop".to_string(),
+                parent_session_key: None,
+                text: "long task".to_string(),
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:stop".to_string(),
+                parent_session_key: None,
+                action: ControlAction::StopRuntime,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.ok);
+        assert!(response.message.contains("已请求停止当前任务"));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let turn = service.persistence.get_turn("turn_stop").await.unwrap().unwrap();
+        assert_eq!(turn.status, "failed");
+        assert!(turn.error_text.as_deref().unwrap_or_default().contains("interrupted"));
+    }
+
+    #[tokio::test]
+    async fn control_can_stop_turn_while_runtime_is_starting() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(SlowInterruptibleMockRuntime);
+        let service = build_service(runtime, sink).await;
+        let session = service.registry.resolve("control:stop-starting", None).await.unwrap();
+        let workspace = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let runtime = service
+            .persistence
+            .create_runtime(
+                &runtime_scope_key("codex", &workspace),
+                "codex-stop-starting",
+                "codex",
+                &workspace,
+                false,
+            )
+            .await
+            .unwrap();
+        let _ = service
+            .replace_runtime_selection(&session, "codex", &workspace, Some(&runtime.runtime_id), None, None)
+            .await
+            .unwrap();
+
+        service
+            .accept_turn(CoreTurnRequest {
+                turn_id: "turn_stop_starting".to_string(),
+                session_key: "control:stop-starting".to_string(),
+                parent_session_key: None,
+                text: "long task".to_string(),
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:stop-starting".to_string(),
+                parent_session_key: None,
+                action: ControlAction::StopRuntime,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.ok);
+        assert!(response.message.contains("已请求停止当前任务"));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let turn = service
+            .persistence
+            .get_turn("turn_stop_starting")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(turn.status, "failed");
+        assert!(turn.error_text.as_deref().unwrap_or_default().contains("interrupted"));
+    }
+
+    #[test]
+    fn expand_workspace_input_supports_tilde_paths() {
+        let fake_home = PathBuf::from(format!("/tmp/remoteagent-home-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(fake_home.join("demo")).unwrap();
+        std::env::set_var("HOME", &fake_home);
+
+        let resolved = expand_workspace_input("~/demo").unwrap();
+        assert_eq!(resolved, fake_home.join("demo"));
     }
 
     fn write_claude_jsonl(
@@ -1605,5 +2726,75 @@ mod tests {
             workspace.to_string_lossy(),
         );
         std::fs::write(path, content).unwrap();
+    }
+
+    fn write_codex_state_db(path: &Path, workspace: &Path) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sandbox_policy TEXT NOT NULL,
+                approval_mode TEXT NOT NULL,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                has_user_event INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                archived_at INTEGER,
+                git_sha TEXT,
+                git_branch TEXT,
+                git_origin_url TEXT,
+                cli_version TEXT NOT NULL DEFAULT '',
+                first_user_message TEXT NOT NULL DEFAULT '',
+                agent_nickname TEXT,
+                agent_role TEXT,
+                memory_mode TEXT NOT NULL DEFAULT 'enabled'
+            );
+            "#,
+        )
+        .unwrap();
+        let workspace = workspace.to_string_lossy().to_string();
+        conn.execute(
+            r#"
+            INSERT INTO threads (
+                id, rollout_path, created_at, updated_at, source, model_provider, cwd, title,
+                sandbox_policy, approval_mode, tokens_used, has_user_event, archived, git_branch,
+                cli_version, first_user_message, memory_mode
+            ) VALUES (?1, '', 1, 10, 'cli', 'openai', ?2, 'mcdataset', 'danger-full-access',
+                      'never', 0, 1, 0, 'master', '0.107.0', 'first codex task', 'enabled')
+            "#,
+            rusqlite::params!["codex-a", workspace],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO threads (
+                id, rollout_path, created_at, updated_at, source, model_provider, cwd, title,
+                sandbox_policy, approval_mode, tokens_used, has_user_event, archived, git_branch,
+                cli_version, first_user_message, memory_mode
+            ) VALUES (?1, '', 1, 20, 'cli', 'openai', ?2, 'mcdataset 2', 'danger-full-access',
+                      'never', 0, 1, 0, 'feature/demo', '0.107.0', 'second codex task', 'enabled')
+            "#,
+            rusqlite::params!["codex-b", workspace],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO threads (
+                id, rollout_path, created_at, updated_at, source, model_provider, cwd, title,
+                sandbox_policy, approval_mode, tokens_used, has_user_event, archived, git_branch,
+                cli_version, first_user_message, memory_mode
+            ) VALUES (?1, '', 1, 30, 'cli', 'openai', '/tmp/elsewhere', 'other', 'danger-full-access',
+                      'never', 0, 1, 0, 'other', '0.107.0', 'ignore me', 'enabled')
+            "#,
+            rusqlite::params!["codex-other"],
+        )
+        .unwrap();
     }
 }

@@ -16,8 +16,8 @@ fi
 : "${APP_ID:?missing APP_ID}"
 : "${APP_SECRET:?missing APP_SECRET}"
 
-export BIND="${BIND:-127.0.0.1:3000}"
-export CORE_BIND="${CORE_BIND:-127.0.0.1:3001}"
+export BIND="${BIND:-127.0.0.1:1127}"
+export CORE_BIND="${CORE_BIND:-127.0.0.1:7211}"
 export CORE_BASE_URL="${CORE_BASE_URL:-http://$CORE_BIND}"
 export CORE_INGEST_TOKEN="${CORE_INGEST_TOKEN:-bridge_ingest_local_20260307}"
 export GATEWAY_EVENT_URL="${GATEWAY_EVENT_URL:-http://$BIND/internal/gateway/event}"
@@ -33,7 +33,7 @@ export CODEX_BIN="${CODEX_BIN:-codex}"
 export CODEX_WORKDIR="${CODEX_WORKDIR:-./workspace}"
 export CODEX_SKIP_GIT_REPO_CHECK="${CODEX_SKIP_GIT_REPO_CHECK:-true}"
 export RUNTIME_MODE="${RUNTIME_MODE:-acp_fallback}"
-export ACP_ADAPTER="${ACP_ADAPTER:-codex}"
+export ACP_ADAPTER="${ACP_ADAPTER:-claude_code}"
 export ACP_AGENT_CMD="${ACP_AGENT_CMD:-}"
 export RENDER_MIN_UPDATE_MS="${RENDER_MIN_UPDATE_MS:-700}"
 export TODO_EVENT_LOG_PATH="${TODO_EVENT_LOG_PATH:-$ROOT_DIR/.run/todo-events.jsonl}"
@@ -69,10 +69,10 @@ if [ ! -d "$GATEWAY_DIR/node_modules" ]; then
   (cd "$GATEWAY_DIR" && npm install)
 fi
 
-nohup bash -lc "cd '$ROOT_DIR' && cargo run --bin feishu-acp-bridge-demo" >"$RUN_DIR/rust.log" 2>&1 &
+nohup "$ROOT_DIR/scripts/run-core.sh" >"$RUN_DIR/rust.log" 2>&1 &
 echo $! > "$RUN_DIR/rust.pid"
 
-nohup bash -lc "cd '$GATEWAY_DIR' && npm start" >"$RUN_DIR/gateway.log" 2>&1 &
+nohup "$ROOT_DIR/scripts/run-gateway.sh" >"$RUN_DIR/gateway.log" 2>&1 &
 echo $! > "$RUN_DIR/gateway.pid"
 
 for _ in $(seq 1 40); do

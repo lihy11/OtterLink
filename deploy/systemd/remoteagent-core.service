@@ -1,0 +1,21 @@
+[Unit]
+Description=remoteagent Rust core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__ROOT_DIR__
+EnvironmentFile=__ENV_FILE__
+ExecStart=__ROOT_DIR__/scripts/run-core.sh
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+KillSignal=SIGTERM
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

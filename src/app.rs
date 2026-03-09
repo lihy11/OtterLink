@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use axum::{routing::{get, post}, Router};
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::fs;
 use tracing::info;
 
@@ -103,6 +104,26 @@ pub async fn run() -> Result<()> {
     );
     info!("core listening on {}", config.core_bind);
     let listener = tokio::net::TcpListener::bind(config.core_bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(wait_for_shutdown_signal())
+        .await?;
     Ok(())
+}
+
+async fn wait_for_shutdown_signal() {
+    let mut sigterm = signal(SignalKind::terminate()).expect("register SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("register SIGINT handler");
+    let mut sighup = signal(SignalKind::hangup()).expect("register SIGHUP handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => {
+            info!("received SIGTERM, shutting down core");
+        }
+        _ = sigint.recv() => {
+            info!("received SIGINT, shutting down core");
+        }
+        _ = sighup.recv() => {
+            info!("received SIGHUP, shutting down core for reload");
+        }
+    }
 }

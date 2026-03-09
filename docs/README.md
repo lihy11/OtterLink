@@ -9,15 +9,23 @@
 2. `design.md`
    关键设计决策和消息生命周期。
 3. `interfaces.md`
-   Rust core API、JS gateway API、标准协议。
+   Rust core API、JS gateway API、标准协议，以及 runtime 导入来源。
 4. `configuration.md`
    运行配置、认证配置、runtime 配置。
 5. `data-model.md`
    SQLite 和 gateway 内存状态模型。
 6. `operations.md`
    启动、停止、测试、排障。
-7. `api-examples.md`
+7. `installation.md`
+   Linux 安装、构建、`systemd` 部署和重载。
+8. `macos-installation.md`
+   macOS `launchd` 安装、启动和重载。
+9. `api-examples.md`
    典型请求、响应和脚本示例。
+10. `acp.md`
+   ACP 功能与官方文档的逐项映射。
+
+最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`，以及代理注入策略。
 
 ## 背景资料
 
@@ -37,4 +45,16 @@
 4. `configuration.md`
 5. `data-model.md`
 6. `operations.md`
-7. `api-examples.md`
+7. `installation.md`
+8. `macos-installation.md`
+9. `api-examples.md`
+10. `acp.md`
+
+## 部署资源
+
+- `../deploy/systemd/remoteagent-core.service`
+- `../deploy/systemd/remoteagent-gateway.service`
+- `../deploy/systemd/remoteagent.target`
+- `../deploy/systemd/remoteagent.env.example`
+- `../deploy/launchd/com.remoteagent.core.plist`
+- `../deploy/launchd/com.remoteagent.gateway.plist`

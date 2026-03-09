@@ -72,11 +72,29 @@ gateway 进程内维护：
 
 这个上下文目前只保存在内存中，服务重启后不会恢复。
 
-## Claude 本地 Session 导入
+### Active Turn Map
 
-`/runtime load [workspace]` 会从 `CLAUDE_HOME_DIR/projects/<workspace-key>/` 导入 Claude 历史 session。
+core 进程内还维护：
 
-- 优先读取 `sessions-index.json`
-- 没有索引时回退读取目录下的 `*.jsonl`
+- `session_key -> active turn cancel handle`
+
+用于 `/runtime stop` 取消当前运行中的 turn。这个状态只存在内存中，服务重启后不会恢复。
+
+
+
+## 本地 Session 导入
+
+`/runtime load [workspace]` 会按当前 agent 导入历史 session：
+
+- 首选：ACP `session/list`
+- `claude_code` 回退：`CLAUDE_HOME_DIR/projects/<workspace-key>/`
+- `codex` 回退：`CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表
+
+当前聊天还会保存一份 `runtime_selection`，记录当前选中的 `agent_kind / workspace_path / selected_runtime_id`。
+当前实现同时把 `proxy_mode / proxy_url` 也保存在 `runtime_selection` 中，用于控制后续 runtime 启动时的代理注入。
+
+- Claude 回退时优先读取 `sessions-index.json`
+- Claude 没有索引时回退读取目录下的 `*.jsonl`
+- Codex 回退时按 `threads.cwd` 与当前 workspace 匹配导入
 - 导入后的 runtime 仍然存入 `runtime_instances`
 - 当前聊天的 active runtime 不会因为导入而自动切换

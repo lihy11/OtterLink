@@ -35,6 +35,16 @@ pub struct RuntimeInstance {
     pub is_active: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeSelection {
+    pub session_key: String,
+    pub agent_kind: String,
+    pub workspace_path: String,
+    pub selected_runtime_id: Option<String>,
+    pub proxy_mode: String,
+    pub proxy_url: Option<String>,
+}
+
 impl Persistence {
     pub fn new(db_path: PathBuf) -> Self {
         Self { db_path }
@@ -94,11 +104,23 @@ impl Persistence {
                     active_runtime_id TEXT NOT NULL,
                     updated_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS runtime_selections (
+                    session_key TEXT PRIMARY KEY,
+                    agent_kind TEXT NOT NULL,
+                    workspace_path TEXT NOT NULL,
+                    selected_runtime_id TEXT,
+                    proxy_mode TEXT NOT NULL DEFAULT 'default',
+                    proxy_url TEXT,
+                    updated_at INTEGER NOT NULL
+                );
                 "#,
             )
             .context("init sqlite schema failed")?;
             let _ = conn.execute("ALTER TABLE runtime_instances ADD COLUMN tag TEXT", []);
             let _ = conn.execute("ALTER TABLE runtime_instances ADD COLUMN prompt_preview TEXT", []);
+            let _ = conn.execute("ALTER TABLE runtime_selections ADD COLUMN proxy_mode TEXT NOT NULL DEFAULT 'default'", []);
+            let _ = conn.execute("ALTER TABLE runtime_selections ADD COLUMN proxy_url TEXT", []);
             Ok(())
         })
         .await
@@ -315,12 +337,10 @@ impl Persistence {
             let mut stmt = conn.prepare(
                 r#"
                 SELECT r.runtime_id, r.session_key, r.label, r.agent_kind, r.workspace_path,
-                       r.runtime_session_ref, r.tag, r.prompt_preview, r.last_assistant_message,
-                       CASE WHEN b.active_runtime_id = r.runtime_id THEN 1 ELSE 0 END AS is_active
+                       r.runtime_session_ref, r.tag, r.prompt_preview, r.last_assistant_message
                 FROM runtime_instances r
-                LEFT JOIN conversation_bindings b ON b.session_key = r.session_key
                 WHERE r.session_key = ?1
-                ORDER BY is_active DESC, r.created_at DESC
+                ORDER BY r.created_at DESC
                 "#,
             )?;
             let mapped = stmt.query_map(params![session_key], |row| {
@@ -334,7 +354,7 @@ impl Persistence {
                     tag: row.get(6)?,
                     prompt_preview: row.get(7)?,
                     last_assistant_message: row.get(8)?,
-                    is_active: row.get::<_, i64>(9)? == 1,
+                    is_active: false,
                 })
             })?;
             let mut runtimes = Vec::new();
@@ -346,6 +366,44 @@ impl Persistence {
         .await
         .context("join sqlite list_runtimes task failed")??;
         Ok(runtimes)
+    }
+
+    pub async fn get_runtime(&self, runtime_id: &str) -> Result<Option<RuntimeInstance>> {
+        let path = self.db_path.clone();
+        let runtime_id = runtime_id.to_string();
+        let runtime = tokio::task::spawn_blocking(move || -> Result<Option<RuntimeInstance>> {
+            let conn = Connection::open(&path)
+                .with_context(|| format!("open sqlite failed: {:?}", path))?;
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT runtime_id, session_key, label, agent_kind, workspace_path,
+                       runtime_session_ref, tag, prompt_preview, last_assistant_message
+                FROM runtime_instances
+                WHERE runtime_id = ?1
+                LIMIT 1
+                "#,
+            )?;
+            let mut rows = stmt.query(params![runtime_id])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(RuntimeInstance {
+                    runtime_id: row.get(0)?,
+                    session_key: row.get(1)?,
+                    label: row.get(2)?,
+                    agent_kind: row.get(3)?,
+                    workspace_path: row.get(4)?,
+                    runtime_session_ref: row.get(5)?,
+                    tag: row.get(6)?,
+                    prompt_preview: row.get(7)?,
+                    last_assistant_message: row.get(8)?,
+                    is_active: false,
+                }))
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .context("join sqlite get_runtime task failed")??;
+        Ok(runtime)
     }
 
     pub async fn create_runtime(
@@ -541,6 +599,94 @@ impl Persistence {
         })
         .await
         .context("join sqlite set_active_runtime task failed")??;
+        Ok(())
+    }
+
+    pub async fn clear_active_runtime(&self, session_key: &str) -> Result<()> {
+        let path = self.db_path.clone();
+        let session_key = session_key.to_string();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = Connection::open(&path)
+                .with_context(|| format!("open sqlite failed: {:?}", path))?;
+            conn.execute("DELETE FROM conversation_bindings WHERE session_key = ?1", params![session_key])?;
+            Ok(())
+        })
+        .await
+        .context("join sqlite clear_active_runtime task failed")??;
+        Ok(())
+    }
+
+    pub async fn get_runtime_selection(&self, session_key: &str) -> Result<Option<RuntimeSelection>> {
+        let path = self.db_path.clone();
+        let session_key = session_key.to_string();
+        let selection = tokio::task::spawn_blocking(move || -> Result<Option<RuntimeSelection>> {
+            let conn = Connection::open(&path)
+                .with_context(|| format!("open sqlite failed: {:?}", path))?;
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT session_key, agent_kind, workspace_path, selected_runtime_id, proxy_mode, proxy_url
+                FROM runtime_selections
+                WHERE session_key = ?1
+                LIMIT 1
+                "#,
+            )?;
+            let mut rows = stmt.query(params![session_key])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(RuntimeSelection {
+                    session_key: row.get(0)?,
+                    agent_kind: row.get(1)?,
+                    workspace_path: row.get(2)?,
+                    selected_runtime_id: row.get(3)?,
+                    proxy_mode: row.get(4)?,
+                    proxy_url: row.get(5)?,
+                }))
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .context("join sqlite get_runtime_selection task failed")??;
+        Ok(selection)
+    }
+
+    pub async fn upsert_runtime_selection(
+        &self,
+        session_key: &str,
+        agent_kind: &str,
+        workspace_path: &str,
+        selected_runtime_id: Option<&str>,
+        proxy_mode: &str,
+        proxy_url: Option<&str>,
+    ) -> Result<()> {
+        let path = self.db_path.clone();
+        let session_key = session_key.to_string();
+        let agent_kind = agent_kind.to_string();
+        let workspace_path = workspace_path.to_string();
+        let selected_runtime_id = selected_runtime_id.map(str::to_string);
+        let proxy_mode = proxy_mode.to_string();
+        let proxy_url = proxy_url.map(str::to_string);
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = Connection::open(&path)
+                .with_context(|| format!("open sqlite failed: {:?}", path))?;
+            conn.execute(
+                r#"
+                INSERT INTO runtime_selections (
+                    session_key, agent_kind, workspace_path, selected_runtime_id, proxy_mode, proxy_url, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ON CONFLICT(session_key) DO UPDATE SET
+                    agent_kind = excluded.agent_kind,
+                    workspace_path = excluded.workspace_path,
+                    selected_runtime_id = excluded.selected_runtime_id,
+                    proxy_mode = excluded.proxy_mode,
+                    proxy_url = excluded.proxy_url,
+                    updated_at = excluded.updated_at
+                "#,
+                params![session_key, agent_kind, workspace_path, selected_runtime_id, proxy_mode, proxy_url, now_unix()],
+            )?;
+            Ok(())
+        })
+        .await
+        .context("join sqlite upsert_runtime_selection task failed")??;
         Ok(())
     }
 

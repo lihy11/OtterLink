@@ -15,7 +15,7 @@
 2. 处理配对、白名单、用户身份认证。
 3. 根据飞书上下文生成 `session_key`。
 4. 将平台事件转换为 `CoreTurnRequest` 发给 Rust。
-5. 解析 `/runtime ...`、`/workspace ...` 控制命令并转换为 `CoreControlRequest`。
+5. 解析 `/runtime ...` 控制命令并转换为 `CoreControlRequest`。
 6. 将 Rust 返回的标准消息渲染为飞书 `text/post/interactive`。
 
 ### 2. core 层
@@ -62,11 +62,12 @@ flowchart LR
 2. gateway 完成 auth / pairing / session routing。
 3. 普通消息走 `POST /internal/core/turn`；控制命令走 `POST /internal/core/control`。
 4. Rust core resolve session、runtime binding、持久化状态。
-5. 如果是 `load_runtimes`，core 会从 Claude 本地目录导入历史 session。
-6. 普通 turn 启动 runtime，并持续输出统一事件。
-7. core 生成 `progress` / `todo` / `final` 标准消息。
-8. core 回调 gateway 的 `/internal/gateway/event`。
-9. gateway 利用飞书卡片和 reply/update 能力完成展示。
+5. 如果是 `load_runtimes`，core 会优先按当前 agent 调用 ACP `session/list`；agent 不支持时才回退本地目录或 sqlite 导入历史 session。
+6. `/runtime stop` 这类控制命令会由 core 直接取消当前 turn，不经过普通 prompt 执行。
+7. 普通 turn 启动 runtime，并持续输出统一事件。
+8. core 生成 `progress` / `todo` / `final` 标准消息。
+9. core 回调 gateway 的 `/internal/gateway/event`。
+10. gateway 利用飞书卡片和 reply/update 能力完成展示。
 
 ## 边界原则
 

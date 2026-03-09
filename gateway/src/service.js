@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const { parseControlCommand, renderControlResponse } = require('./commands');
+const { parseControlCommand, renderControlResponse, renderHistoryOverview, renderRuntimeHelp } = require('./commands');
 const { isAuthorized, parsePairCommand, unauthorizedHint, validatePairRequest } = require('./feishu/auth');
 const { renderOutboundMessage } = require('./feishu/render');
 const { buildSessionRoute, normalizeFeishuEvent } = require('./feishu/session');
@@ -47,13 +47,29 @@ class GatewayService {
     const route = buildSessionRoute(inbound);
     const controlCommand = parseControlCommand(inbound.text);
     if (controlCommand) {
-      const response = await this.coreClient.controlSession({
-        session_key: route.sessionKey,
-        parent_session_key: route.parentSessionKey,
-        ...controlCommand,
-      });
-      await this.replyMessage(inbound.messageId, renderControlResponse(response));
-      return { handled: true, kind: 'control', sessionKey: route.sessionKey };
+      if (controlCommand.local_action === 'runtime_help') {
+        await this.replyMessage(inbound.messageId, renderRuntimeHelp());
+        return { handled: true, kind: 'control_help', sessionKey: route.sessionKey };
+      }
+      if (controlCommand.local_action === 'runtime_invalid') {
+        await this.replyText(inbound.messageId, `Runtime 命令错误：${controlCommand.message}`);
+        return { handled: true, kind: 'control_invalid', sessionKey: route.sessionKey };
+      }
+      try {
+        const response = await this.coreClient.controlSession({
+          session_key: route.sessionKey,
+          parent_session_key: route.parentSessionKey,
+          ...controlCommand,
+        });
+        await this.replyMessage(inbound.messageId, renderControlResponse(response));
+        if (response.history_overview && response.history_overview.turns && response.history_overview.turns.length > 0) {
+          await this.replyMessage(inbound.messageId, renderHistoryOverview(response.history_overview));
+        }
+        return { handled: true, kind: 'control', sessionKey: route.sessionKey };
+      } catch (error) {
+        await this.replyText(inbound.messageId, `Runtime 控制失败：${extractCoreError(error)}`);
+        return { handled: true, kind: 'control_error', sessionKey: route.sessionKey };
+      }
     }
 
     const turnId = `turn_${crypto.randomUUID()}`;
@@ -65,12 +81,18 @@ class GatewayService {
       createdAt: Date.now(),
     });
 
-    await this.coreClient.submitTurn({
-      turn_id: turnId,
-      session_key: route.sessionKey,
-      parent_session_key: route.parentSessionKey,
-      text: inbound.text,
-    });
+    try {
+      await this.coreClient.submitTurn({
+        turn_id: turnId,
+        session_key: route.sessionKey,
+        parent_session_key: route.parentSessionKey,
+        text: inbound.text,
+      });
+    } catch (error) {
+      this.turnContexts.delete(turnId);
+      await this.replyText(inbound.messageId, `无法开始本轮：${extractCoreError(error)}`);
+      return { ignored: true, reason: 'turn_rejected', sessionKey: route.sessionKey };
+    }
 
     return { accepted: true, turnId, sessionKey: route.sessionKey };
   }
@@ -161,6 +183,16 @@ class GatewayService {
     }
     return this.feishuClient.replyToMessage(messageId, rendered);
   }
+}
+
+function extractCoreError(error) {
+  const text = error?.message || String(error);
+  const marker = ' error=';
+  const index = text.indexOf(marker);
+  if (index >= 0) {
+    return text.slice(index + marker.length).trim();
+  }
+  return text;
 }
 
 module.exports = {
