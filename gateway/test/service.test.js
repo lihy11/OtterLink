@@ -22,6 +22,11 @@ function makeService(overrides = {}) {
         calls.replies.push({ messageId, rendered });
         return `reply_${calls.replies.length}`;
       },
+      async reactToMessage(messageId, emojiType) {
+        calls.reactions = calls.reactions || [];
+        calls.reactions.push({ messageId, emojiType });
+        return messageId;
+      },
       async replyCardKitToMessage(messageId, card) {
         calls.cardReplies = calls.cardReplies || [];
         calls.cardReplies.push({ messageId, card });
@@ -104,6 +109,8 @@ test('authorized inbound message is forwarded to core with computed session keys
 
   assert.equal(result.accepted, true);
   assert.equal(calls.submits.length, 1);
+  assert.equal(calls.reactions.length, 1);
+  assert.deepEqual(calls.reactions[0], { messageId: 'om_1', emojiType: 'OK' });
   assert.equal(calls.submits[0].session_key, 'feishu:thread:oc_1:th_1');
   assert.equal(calls.submits[0].parent_session_key, 'feishu:chat:oc_1');
 });
@@ -161,11 +168,16 @@ test('progress slot sends a new plain text message for each intermediate update'
     message: {
       kind: 'card',
       card: {
-        title: 'Progress',
-        theme: 'blue',
+        title: 'Codex 持续运行中',
+        theme: 'grey',
         wide_screen_mode: true,
         update_multi: true,
-        blocks: [{ kind: 'markdown', text: 'first' }],
+        blocks: [
+          { kind: 'markdown', text: '**🔄 正在运行**' },
+          { kind: 'markdown', text: '🔄 已经开始处理本轮请求' },
+          { kind: 'divider' },
+          { kind: 'markdown', text: '📌 **最近输出摘录**\n\nfirst' },
+        ],
       },
     },
   });
@@ -175,11 +187,16 @@ test('progress slot sends a new plain text message for each intermediate update'
     message: {
       kind: 'card',
       card: {
-        title: 'Progress',
-        theme: 'blue',
+        title: 'Codex 持续运行中',
+        theme: 'grey',
         wide_screen_mode: true,
         update_multi: true,
-        blocks: [{ kind: 'markdown', text: 'second' }],
+        blocks: [
+          { kind: 'markdown', text: '**🔄 正在运行**' },
+          { kind: 'markdown', text: '🛠️ 仍有 5 个工具调用在运行' },
+          { kind: 'divider' },
+          { kind: 'markdown', text: '📌 **最近输出摘录**\n\nfirst\nsecond' },
+        ],
       },
     },
   });
@@ -189,6 +206,43 @@ test('progress slot sends a new plain text message for each intermediate update'
   assert.equal(calls.replies.length, 2);
   assert.match(calls.replies[0].rendered.content.text, /first/);
   assert.match(calls.replies[1].rendered.content.text, /second/);
+  assert.doesNotMatch(calls.replies[0].rendered.content.text, /正在运行|最近输出摘录|已经开始处理本轮请求/);
+  assert.doesNotMatch(calls.replies[1].rendered.content.text, /仍有 5 个工具调用在运行|最近输出摘录/);
+});
+
+test('progress slot ignores status-only updates with no real content', async () => {
+  const { service, calls } = makeService();
+  await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_progress_empty',
+      chat_id: 'oc_progress_empty',
+      chat_type: 'group',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  });
+
+  const turnId = calls.submits[0].turn_id;
+  const result = await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'progress',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Codex 持续运行中',
+        theme: 'grey',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [
+          { kind: 'markdown', text: '**🔄 正在运行**' },
+          { kind: 'markdown', text: '🔄 已经开始处理本轮请求' },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.reason, 'empty_progress');
+  assert.equal(calls.replies.length, 0);
 });
 
 test('todo slot keeps updating the same cardkit card', async () => {
@@ -279,6 +333,11 @@ test('todo card update failure falls back to plain text without affecting progre
         calls.replies.push({ messageId, rendered });
         return `reply_${calls.replies.length}`;
       },
+      async reactToMessage(messageId, emojiType) {
+        calls.reactions = calls.reactions || [];
+        calls.reactions.push({ messageId, emojiType });
+        return messageId;
+      },
       async replyCardKitToMessage(messageId, card) {
         calls.cardReplies = calls.cardReplies || [];
         calls.cardReplies.push({ messageId, card });
@@ -317,11 +376,16 @@ test('todo card update failure falls back to plain text without affecting progre
     message: {
       kind: 'card',
       card: {
-        title: 'Progress',
-        theme: 'blue',
+        title: 'Codex 持续运行中',
+        theme: 'grey',
         wide_screen_mode: true,
         update_multi: true,
-        blocks: [{ kind: 'markdown', text: 'first card body' }],
+        blocks: [
+          { kind: 'markdown', text: '**🔄 正在运行**' },
+          { kind: 'markdown', text: '🛠️ 正在执行工具调用，当前活跃 1 个' },
+          { kind: 'divider' },
+          { kind: 'markdown', text: '📌 **最近输出摘录**\n\nfirst card body' },
+        ],
       },
     },
   });
@@ -382,6 +446,11 @@ test('final card delivery failure falls back to plain text instead of crashing',
       async replyToMessage(messageId, rendered) {
         calls.replies.push({ messageId, rendered });
         return `reply_${calls.replies.length}`;
+      },
+      async reactToMessage(messageId, emojiType) {
+        calls.reactions = calls.reactions || [];
+        calls.reactions.push({ messageId, emojiType });
+        return messageId;
       },
       async replyCardKitToMessage(messageId, card) {
         calls.cardReplies = calls.cardReplies || [];

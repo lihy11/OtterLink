@@ -33,6 +33,8 @@
 - `RUNTIME_MODE`: `acp | exec_json | acp_fallback`
 - `ACP_ADAPTER`: `claude_code | codex`，默认 `claude_code`
 - `ACP_AGENT_CMD`: 显式覆盖 ACP 启动命令
+- `claude_code` 默认 launcher 为 `npx -y @zed-industries/claude-code-acp@0.16.2`
+- `acp_fallback` 不再自动回退；如果主 runtime 缺失、初始化失败或启动失败，core 会直接返回错误
 - `codex` 默认 launcher 会显式安装 `@zed-industries/codex-acp@0.9.2` 与 `@zed-industries/codex-acp-linux-x64@0.9.2`，避免 `npx` 漏装平台 binary
 - `CODEX_BIN`: `codex` 可执行文件
 - `CODEX_WORKDIR`: runtime 工作目录

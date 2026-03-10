@@ -59,6 +59,12 @@ curl -X POST http://127.0.0.1:1127/internal/gateway/event \
   }'
 ```
 
+说明：
+
+- `progress` 示例里的 `card` 只是 core 到 gateway 的标准事件形态
+- 新逻辑里 core 更推荐直接发送 `kind=text` 的 `progress` 中间消息；这些消息应当已经在 core 内部完成 chunk 聚合，而不是 token 级碎片
+- turn 被接受时，gateway 还会额外对用户原消息调用一次消息表情回复接口，不再发送单独的“开始运行”文本
+
 ## 注入飞书事件到 Gateway
 
 ```bash

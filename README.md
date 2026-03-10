@@ -57,10 +57,12 @@ Feishu card delivery now uses `CardKit`:
 
 Feishu rendering policy:
 
-1. `progress` slot is always downgraded to plain text replies; each core intermediate update becomes a new Feishu message
-2. `todo` slot keeps using a shared CardKit card with in-place updates
-3. `final` slot keeps using a result CardKit card
-4. if `todo` or `final` card delivery/update times out or fails, gateway falls back to plain text for that slot instead of aborting the turn
+1. turn accepted uses a Feishu message reaction instead of a separate "started" message
+2. `progress` slot now carries assistant-message-level text from core instead of raw token/chunk fragments; gateway forwards each completed intermediate message as a standalone plain text reply and drops synthetic running/completed status scaffolding
+3. `todo` slot keeps using a shared CardKit card with in-place updates
+4. `final` slot keeps using a result CardKit card
+5. if `todo` or `final` card delivery/update times out or fails, gateway falls back to plain text for that slot instead of aborting the turn
+6. `final` no longer falls back to the full accumulated progress transcript; when ACP does not provide an explicit final message, core only uses the latest assistant segment as the final answer
 
 ## Local Start
 
@@ -192,6 +194,8 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 - `PAIR_AUTH_TOKEN`, `ALLOW_FROM_OPEN_IDS`, `PAIR_STORE_PATH`
 - `RUNTIME_MODE`: `acp | exec_json | acp_fallback`
 - `ACP_ADAPTER`: `claude_code | codex`，默认 `claude_code`
+- `claude_code` 默认 launcher 走 `npx -y @zed-industries/claude-code-acp@0.16.2`
+- `acp_fallback` 现在不会在 agent 之间或实现之间自动回退；只要主 runtime 启动失败，就直接报错
 - `CLAUDE_HOME_DIR`: Claude 本地 session 根目录，默认 `~/.claude`
 - `CODEX_HOME_DIR`: Codex 本地 session 根目录，默认 `~/.codex`
 - `ACP_PROXY_URL`: 运行时默认代理地址；也会回退读取 `ALL_PROXY / HTTPS_PROXY / HTTP_PROXY`

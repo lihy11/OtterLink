@@ -90,14 +90,18 @@ Request:
 
 说明：
 
-- `progress` 槽位即使收到 `kind=card`，gateway 也会降级成普通文本消息发送，并且每次中间更新都会追加一条新消息
+- turn 被 core 接受后，gateway 会优先对用户原消息补一个飞书表情回复，表示任务已启动
+- `progress` 槽位现在优先接收 core 发来的 assistant-message 级文本；core 会先把 chunk 聚合成完整中间消息，再交给 gateway 发送
+- `progress` 普通消息只保留真实中间文本增量，不再包含 `Codex 持续运行中`、`正在运行`、`最近输出摘录`、工具调用统计等包装信息
 - `text / post / raw` 仍走普通 `im/v1/messages` 消息接口
 - `todo` / `final` 等卡片槽位继续走 Feishu `CardKit`：
   1. `POST /open-apis/cardkit/v1/cards`
   2. `POST /open-apis/im/v1/messages/...` 引用 `card_id`
   3. `PUT /open-apis/cardkit/v1/cards/{card_id}/elements/content/content`
   4. `PATCH /open-apis/cardkit/v1/cards/{card_id}/settings`
+- 消息表情回复走 `POST /open-apis/im/v1/messages/{message_id}/reactions`
 - 若 `todo` / `final` 卡片发送或更新失败，gateway 会自动回退为普通文本消息继续发送
+- 若 runtime 没有单独给出最终消息，core 只会把最后一段 assistant 文本作为 `final`，不会把整轮 `progress` 全量拼进最终结果，也不会把同一段最终文本重复发送到 `progress` 和 `final`
 
 ## Gateway Local APIs
 

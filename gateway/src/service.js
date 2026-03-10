@@ -91,6 +91,11 @@ class GatewayService {
         parent_session_key: route.parentSessionKey,
         text: inbound.text,
       });
+      try {
+        await this.feishuClient.reactToMessage?.(inbound.messageId, 'OK');
+      } catch (error) {
+        this.logger.error?.('[gateway] message reaction failed', error);
+      }
     } catch (error) {
       this.turnContexts.delete(turnId);
       await this.replyText(inbound.messageId, `无法开始本轮：${extractCoreError(error)}`);
@@ -107,6 +112,9 @@ class GatewayService {
     }
 
     const slotKey = event.slot;
+    if (slotKey === 'progress') {
+      return this.handleProgressEvent(context, event.message);
+    }
     const rendered = shouldUsePlainMessageTransport(context, slotKey, event.message)
       ? renderFallbackMessage(event.message)
       : renderOutboundMessage(event.message);
@@ -162,6 +170,29 @@ class GatewayService {
         sequence: 0,
       });
     }
+    return { sent: true, messageId: sentMessageId };
+  }
+
+  async handleProgressEvent(context, message) {
+    const slotState = context.slotStates.get('progress');
+    const text = extractProgressText(message, slotState);
+    if (!text) {
+      return { ignored: true, reason: 'empty_progress' };
+    }
+    const sentMessageId = await this.feishuClient.replyToMessage(context.replyToMessageId, {
+      msg_type: 'text',
+      content: { text },
+    });
+    this.updateSlotState(context, 'progress', {
+      messageId: sentMessageId,
+      cardId: null,
+      sequence: 0,
+      lastCard: null,
+      lastProgressText: text,
+      lastProgressSnapshot: slotState?.nextProgressSnapshot || text,
+      nextProgressSnapshot: null,
+      heartbeatTimer: null,
+    });
     return { sent: true, messageId: sentMessageId };
   }
 
@@ -369,6 +400,69 @@ function extractCoreError(error) {
     return text.slice(index + marker.length).trim();
   }
   return text;
+}
+
+function extractProgressText(message, slotState) {
+  if (!message) {
+    return '';
+  }
+  if (message.kind === 'text') {
+    return normalizePlainTextDelta(message.text, slotState);
+  }
+  if (message.kind === 'post') {
+    return normalizePlainTextDelta([message.title, message.text].filter(Boolean).join('\n\n'), slotState);
+  }
+  if (message.kind === 'raw') {
+    return normalizePlainTextDelta(JSON.stringify(message.content), slotState);
+  }
+  if (message.kind !== 'card') {
+    return '';
+  }
+
+  const blocks = Array.isArray(message.card?.blocks) ? message.card.blocks : [];
+  const excerptBlock = blocks.find((block) => block.kind === 'markdown' && block.text.startsWith('📌 **最近输出摘录**'));
+  if (excerptBlock) {
+    const snapshot = excerptBlock.text.replace(/^📌 \*\*最近输出摘录\*\*\n\n?/, '').trimStart();
+    return normalizeProgressSnapshot(snapshot, slotState);
+  }
+
+  const errorBlock = blocks.find((block) => block.kind === 'markdown' && block.text.startsWith('⚠️ **异常信息**'));
+  if (errorBlock) {
+    return errorBlock.text.replace(/^⚠️ \*\*异常信息\*\*\n?/, '').trim();
+  }
+  return '';
+}
+
+function normalizeProgressSnapshot(snapshot, slotState) {
+  const normalizedSnapshot = String(snapshot || '');
+  if (!normalizedSnapshot.trim()) {
+    if (slotState) {
+      slotState.nextProgressSnapshot = normalizedSnapshot;
+    }
+    return '';
+  }
+  const previous = slotState?.lastProgressSnapshot || '';
+  if (slotState) {
+    slotState.nextProgressSnapshot = normalizedSnapshot;
+  }
+  if (previous && normalizedSnapshot.startsWith(previous)) {
+    return normalizedSnapshot.slice(previous.length).trimStart();
+  }
+  return normalizedSnapshot.trim();
+}
+
+function normalizePlainTextDelta(text, slotState) {
+  const normalizedText = String(text || '').trim();
+  if (!normalizedText) {
+    return '';
+  }
+  if (slotState) {
+    slotState.nextProgressSnapshot = normalizedText;
+  }
+  if (slotState?.lastProgressText === normalizedText || slotState?.lastProgressSnapshot === normalizedText) {
+    return '';
+  }
+  return normalizedText;
 }
 
 module.exports = {

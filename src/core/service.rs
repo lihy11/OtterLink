@@ -4,7 +4,6 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -523,8 +522,6 @@ impl CoreService {
 
             let prompt = self.build_prompt(&session, &request.text).await;
             let mut render = TurnRenderState::new(&session);
-            self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-                .await?;
 
             let mut turn = self
                 .runtime
@@ -561,7 +558,7 @@ impl CoreService {
                     }
                 }
 
-                if render.should_flush(self.config.render_min_update_ms) {
+                if render.has_progress_update() {
                     self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
                         .await?;
                     render.mark_flushed();
@@ -577,9 +574,12 @@ impl CoreService {
                         request.turn_id, session.session_key, error_text
                     );
                     render.fail(error_text.clone());
-                    let _ = self
-                        .publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-                        .await;
+                    if render.has_progress_update() {
+                        let _ = self
+                            .publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                            .await;
+                        render.mark_flushed();
+                    }
                     let _ = self
                         .publish(&request.turn_id, OutboundSlot::Final, render.final_message())
                         .await;
@@ -607,8 +607,11 @@ impl CoreService {
                 .complete_turn(&request.turn_id, render.final_assistant_message().as_deref())
                 .await?;
 
-            self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
-                .await?;
+            if render.has_progress_update() {
+                self.publish(&request.turn_id, OutboundSlot::Progress, render.progress_message())
+                    .await?;
+                render.mark_flushed();
+            }
             self.publish(&request.turn_id, OutboundSlot::Final, render.final_message())
                 .await?;
 
@@ -1470,30 +1473,28 @@ fn runtime_matches_selector(runtime: &RuntimeInstance, selector: &str) -> bool {
 
 struct TurnRenderState {
     status: &'static str,
-    progress_excerpt: String,
+    buffered_assistant_text: String,
+    pending_progress_text: String,
+    current_assistant_text: String,
     final_text: Option<String>,
     runtime_session_ref: Option<String>,
     error: Option<String>,
     todo_items: Vec<TodoEntry>,
     active_tool_count: usize,
-    tool_event_icon: &'static str,
-    tool_event_note: String,
-    last_render_at: Instant,
 }
 
 impl TurnRenderState {
     fn new(session: &SessionInfo) -> Self {
         Self {
             status: "running",
-            progress_excerpt: String::new(),
+            buffered_assistant_text: String::new(),
+            pending_progress_text: String::new(),
+            current_assistant_text: String::new(),
             final_text: None,
             runtime_session_ref: session.runtime_session_ref.clone(),
             error: None,
             todo_items: Vec::new(),
             active_tool_count: 0,
-            tool_event_icon: "🫥",
-            tool_event_note: "等待 runtime 返回首个状态".to_string(),
-            last_render_at: Instant::now(),
         }
     }
 
@@ -1502,49 +1503,38 @@ impl TurnRenderState {
         match event {
             NormalizedAgentEvent::TurnStarted => {
                 self.status = "running";
-                self.tool_event_icon = "🔄";
-                self.tool_event_note = "已经开始处理本轮请求".to_string();
             }
             NormalizedAgentEvent::TurnCompleted => {
                 self.status = "completed";
-                self.tool_event_icon = "✅";
-                self.tool_event_note = "本轮执行已收尾".to_string();
             }
             NormalizedAgentEvent::RuntimeSessionReady(runtime_session_ref) => {
                 self.runtime_session_ref = Some(runtime_session_ref);
-                self.tool_event_icon = "🧵";
-                self.tool_event_note = "runtime 会话已建立，可继续追踪".to_string();
             }
             NormalizedAgentEvent::AssistantChunk(text) => {
-                self.progress_excerpt.push_str(&text);
+                self.buffered_assistant_text.push_str(&text);
+                self.current_assistant_text.push_str(&text);
             }
             NormalizedAgentEvent::AssistantMessage(text) => {
+                self.buffered_assistant_text.clear();
+                self.current_assistant_text = text.clone();
                 self.final_text = Some(text);
-                self.tool_event_icon = "💬";
-                self.tool_event_note = "最终结果已经生成，详情见绿色结果卡片".to_string();
             }
             NormalizedAgentEvent::ToolState { state, .. } => match state {
                 crate::agent::normalized::AgentToolState::Pending
                 | crate::agent::normalized::AgentToolState::InProgress => {
+                    self.queue_progress_from_buffer();
                     self.active_tool_count = self.active_tool_count.saturating_add(1);
-                    self.tool_event_icon = "🛠️";
-                    self.tool_event_note = format!("正在执行工具调用，当前活跃 {} 个", self.active_tool_count);
+                    if !self.current_assistant_text.trim().is_empty() {
+                        self.current_assistant_text.clear();
+                    }
                 }
                 crate::agent::normalized::AgentToolState::Completed
                 | crate::agent::normalized::AgentToolState::Failed => {
                     self.active_tool_count = self.active_tool_count.saturating_sub(1);
-                    self.tool_event_icon = if self.active_tool_count == 0 { "📬" } else { "🛠️" };
-                    self.tool_event_note = if self.active_tool_count == 0 {
-                        "最近一轮工具执行已结束，等待新的输出".to_string()
-                    } else {
-                        format!("仍有 {} 个工具调用在运行", self.active_tool_count)
-                    };
                 }
             },
             NormalizedAgentEvent::PlanUpdated(todos) => {
                 self.todo_items = todos;
-                self.tool_event_icon = "🧭";
-                self.tool_event_note = format!("计划已刷新，共 {} 项", self.todo_items.len());
             }
             NormalizedAgentEvent::Usage(_) => {}
         }
@@ -1555,24 +1545,30 @@ impl TurnRenderState {
         if self.status != "failed" {
             self.status = "completed";
         }
-        if self.final_text.is_none() && !self.progress_excerpt.trim().is_empty() {
-            self.final_text = Some(self.progress_excerpt.clone());
+        if self.final_text.is_none() && !self.current_assistant_text.trim().is_empty() {
+            self.final_text = Some(self.current_assistant_text.clone());
         }
+        self.buffered_assistant_text.clear();
     }
 
     fn fail(&mut self, error_text: String) {
         self.status = "failed";
         self.error = Some(error_text);
-        self.tool_event_icon = "⚠️";
-        self.tool_event_note = "执行过程中发生异常".to_string();
     }
 
-    fn should_flush(&self, min_update_ms: u64) -> bool {
-        self.last_render_at.elapsed() >= Duration::from_millis(min_update_ms)
+    fn queue_progress_from_buffer(&mut self) {
+        if self.pending_progress_text.trim().is_empty() && !self.buffered_assistant_text.trim().is_empty() {
+            self.pending_progress_text = self.buffered_assistant_text.clone();
+        }
+        self.buffered_assistant_text.clear();
+    }
+
+    fn has_progress_update(&self) -> bool {
+        !self.pending_progress_text.trim().is_empty()
     }
 
     fn mark_flushed(&mut self) {
-        self.last_render_at = Instant::now();
+        self.pending_progress_text.clear();
     }
 
     fn final_assistant_message(&self) -> Option<String> {
@@ -1580,35 +1576,7 @@ impl TurnRenderState {
     }
 
     fn progress_message(&self) -> OutboundMessage {
-        let mut blocks = vec![
-            CardBlock::Markdown {
-                text: format!("**{} {}**", progress_status_icon(self.status), progress_status_label(self.status)),
-            },
-            CardBlock::Markdown {
-                text: format!("{} {}", self.tool_event_icon, self.tool_event_note),
-            },
-        ];
-
-        if self.status == "running" && !self.progress_excerpt.trim().is_empty() {
-            blocks.push(CardBlock::Divider);
-            blocks.push(CardBlock::Markdown {
-                text: format!("📌 **最近输出摘录**\n\n{}", format_output_excerpt(&self.progress_excerpt, 700)),
-            });
-        }
-
-        if let Some(error_text) = self.error.as_ref() {
-            blocks.push(CardBlock::Divider);
-            blocks.push(CardBlock::Markdown {
-                text: format!("⚠️ **异常信息**\n{}", shorten(error_text, 800)),
-            });
-        }
-
-        card_message(
-            "Codex 持续运行中",
-            if self.status == "failed" { CardTheme::Red } else { CardTheme::Grey },
-            true,
-            blocks,
-        )
+        text_message(self.pending_progress_text.clone())
     }
 
     fn todo_message(&self) -> OutboundMessage {
@@ -1710,37 +1678,6 @@ fn summarize_todos(items: &[TodoEntry]) -> String {
         }
     }
     format!("✅ {}  🔄 {}  ⏳ {}  ⛔ {}", done, doing, waiting, failed)
-}
-
-fn progress_status_icon(status: &str) -> &'static str {
-    match status {
-        "completed" => "✅",
-        "failed" => "⚠️",
-        _ => "🔄",
-    }
-}
-
-fn progress_status_label(status: &str) -> &'static str {
-    match status {
-        "completed" => "已完成",
-        "failed" => "出现异常",
-        _ => "正在运行",
-    }
-}
-
-fn format_output_excerpt(text: &str, max_chars: usize) -> String {
-    let compact = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .rev()
-        .take(6)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
-    shorten(&compact, max_chars)
 }
 
 #[cfg(test)]
@@ -1916,6 +1853,13 @@ mod tests {
             captured: Arc::new(Mutex::new(Vec::new())),
             events: vec![
                 RuntimeEvent::Agent(NormalizedAgentEvent::RuntimeSessionReady("thread_123".to_string())),
+                RuntimeEvent::Agent(NormalizedAgentEvent::AssistantChunk(
+                    "让我先搜索一下当前项目。".to_string(),
+                )),
+                RuntimeEvent::Agent(NormalizedAgentEvent::ToolState {
+                    tool_call_id: "call_1".to_string(),
+                    state: crate::agent::normalized::AgentToolState::InProgress,
+                }),
                 RuntimeEvent::Agent(NormalizedAgentEvent::PlanUpdated(vec![TodoEntry {
                     content: "Inspect repository".to_string(),
                     status: "in_progress".to_string(),
@@ -1970,6 +1914,14 @@ mod tests {
         assert!(events.iter().any(|event| event.slot == OutboundSlot::Progress));
         assert!(events.iter().any(|event| event.slot == OutboundSlot::Todo));
         assert!(events.iter().any(|event| event.slot == OutboundSlot::Final));
+        assert!(events.iter().any(|event| {
+            event.slot == OutboundSlot::Progress
+                && matches!(&event.message, OutboundMessage::Text { text } if text.contains("让我先搜索一下当前项目。"))
+        }));
+        assert!(!events.iter().any(|event| {
+            event.slot == OutboundSlot::Progress
+                && matches!(&event.message, OutboundMessage::Text { text } if text.contains("Final answer"))
+        }));
 
         let stored = service.persistence.get_turn("turn_1").await.unwrap().unwrap();
         assert_eq!(stored.status, "completed");
@@ -2078,7 +2030,8 @@ mod tests {
                 status: "completed".to_string(),
             },
         ];
-        render.progress_excerpt = "first line\nsecond line".to_string();
+        render.pending_progress_text = "first line\nsecond line".to_string();
+        render.current_assistant_text = "line one\nline two\nline three".to_string();
         render.final_text = Some("line one\nline two\nline three".to_string());
 
         let progress = render.progress_message();
@@ -2086,15 +2039,11 @@ mod tests {
         let final_message = render.final_message();
 
         match progress {
-            OutboundMessage::Card { card } => {
-                assert_eq!(card.theme, CardTheme::Grey);
-                let body = format!("{:?}", card.blocks);
-                assert!(body.contains("🔄"));
-                assert!(body.contains("📌"));
-                assert!(!body.contains("session"));
-                assert!(!body.contains("runtime session"));
+            OutboundMessage::Text { text } => {
+                assert!(text.contains("first line"));
+                assert!(text.contains("second line"));
             }
-            _ => panic!("progress should be card"),
+            _ => panic!("progress should be text"),
         }
 
         match todo {
@@ -2124,7 +2073,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_progress_card_does_not_repeat_final_text() {
+    fn finalize_uses_latest_assistant_segment_instead_of_all_progress() {
         let session = SessionInfo {
             session_id: "sess_demo".to_string(),
             session_key: "gateway:test".to_string(),
@@ -2133,18 +2082,44 @@ mod tests {
             last_assistant_message: None,
         };
         let mut render = TurnRenderState::new(&session);
-        render.status = "completed";
-        render.progress_excerpt = "intermediate snippet".to_string();
-        render.final_text = Some("final answer body".to_string());
+        render.pending_progress_text = "让我先搜索".to_string();
+        render.current_assistant_text = "让我先搜索".to_string();
+        render.apply_event(NormalizedAgentEvent::ToolState {
+            tool_call_id: "call_1".to_string(),
+            state: crate::agent::normalized::AgentToolState::InProgress,
+        });
+        render.apply_event(NormalizedAgentEvent::AssistantChunk("最终答案第一段。".to_string()));
+        render.apply_event(NormalizedAgentEvent::AssistantChunk("最终答案第二段。".to_string()));
+        render.finalize();
 
+        assert_eq!(
+            render.final_assistant_message().as_deref(),
+            Some("最终答案第一段。最终答案第二段。")
+        );
+    }
+
+    #[test]
+    fn progress_is_only_queued_when_assistant_segment_is_interrupted_by_tool() {
+        let session = SessionInfo {
+            session_id: "sess_demo".to_string(),
+            session_key: "gateway:test".to_string(),
+            parent_session_id: None,
+            runtime_session_ref: None,
+            last_assistant_message: None,
+        };
+        let mut render = TurnRenderState::new(&session);
+        render.apply_event(NormalizedAgentEvent::AssistantChunk("让我".to_string()));
+        render.apply_event(NormalizedAgentEvent::AssistantChunk("先搜索".to_string()));
+        assert!(!render.has_progress_update());
+
+        render.apply_event(NormalizedAgentEvent::ToolState {
+            tool_call_id: "call_1".to_string(),
+            state: crate::agent::normalized::AgentToolState::InProgress,
+        });
+        assert!(render.has_progress_update());
         match render.progress_message() {
-            OutboundMessage::Card { card } => {
-                let body = format!("{:?}", card.blocks);
-                assert!(!body.contains("final answer body"));
-                assert!(!body.contains("绿色结果卡片"));
-                assert!(!body.contains("session"));
-            }
-            _ => panic!("progress should be card"),
+            OutboundMessage::Text { text } => assert_eq!(text, "让我先搜索"),
+            _ => panic!("progress should be text"),
         }
     }
 

@@ -43,6 +43,18 @@ class FeishuClient {
     return payload.data && payload.data.message_id ? payload.data.message_id : null;
   }
 
+  async reactToMessage(messageId, emojiType = 'OK') {
+    await this.request(`/open-apis/im/v1/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: {
+        reaction_type: {
+          emoji_type: emojiType,
+        },
+      },
+    });
+    return messageId;
+  }
+
   async replyCardKitToMessage(messageId, cardkitCard) {
     const cardId = await this.createCard(cardkitCard);
     const payload = await this.request(

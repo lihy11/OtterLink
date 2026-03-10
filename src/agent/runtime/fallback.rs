@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use tokio::sync::{mpsc, Mutex};
-use tracing::warn;
-
 use crate::agent::runtime::{AgentRuntime, RuntimeCompletion, RuntimeEvent, RuntimeTurn, RuntimeTurnRequest};
 
 pub struct FallbackRuntime {
@@ -41,14 +39,13 @@ impl AgentRuntime for FallbackRuntime {
                     if crate::agent::runtime::is_interrupted_error(&primary_err) {
                         return Err(primary_err);
                     }
-                    warn!(
-                        "runtime {} failed, fallback to {}: {primary_err:?}",
+                    let _ = fallback;
+                    let agent_kind = request.agent_kind.as_deref().unwrap_or("unknown").to_string();
+                    Err(anyhow!(
+                        "runtime {} failed and fallback is disabled for agent `{}`: {primary_err}",
                         primary.name(),
-                        fallback.name()
-                    );
-                    run_runtime(fallback, request, &events_tx, current_cancel)
-                        .await
-                        .with_context(|| format!("fallback after {} failure", primary.name()))
+                        agent_kind,
+                    ))
                 }
             }
         });
@@ -127,6 +124,7 @@ mod tests {
     struct CountingRuntime {
         starts: Arc<AtomicUsize>,
         interrupted: bool,
+        fail_message: Option<&'static str>,
     }
 
     #[async_trait]
@@ -136,9 +134,12 @@ mod tests {
             let (_tx, rx) = mpsc::unbounded_channel();
             let (cancel, _cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
             let interrupted = self.interrupted;
+            let fail_message = self.fail_message;
             let completion = tokio::spawn(async move {
                 if interrupted {
                     Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT))
+                } else if let Some(message) = fail_message {
+                    Err(anyhow!(message))
                 } else {
                     Ok(RuntimeCompletion::default())
                 }
@@ -159,10 +160,12 @@ mod tests {
             Arc::new(CountingRuntime {
                 starts: primary_starts.clone(),
                 interrupted: true,
+                fail_message: None,
             }),
             Arc::new(CountingRuntime {
                 starts: fallback_starts.clone(),
                 interrupted: false,
+                fail_message: None,
             }),
         );
 
@@ -180,6 +183,80 @@ mod tests {
 
         let result = turn.completion.await.unwrap();
         assert!(result.is_err());
+        assert_eq!(primary_starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fallback_starts.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn primary_error_does_not_fallback_for_claude_code() {
+        let primary_starts = Arc::new(AtomicUsize::new(0));
+        let fallback_starts = Arc::new(AtomicUsize::new(0));
+        let runtime = FallbackRuntime::new(
+            Arc::new(CountingRuntime {
+                starts: primary_starts.clone(),
+                interrupted: false,
+                fail_message: Some("acp initialize failed"),
+            }),
+            Arc::new(CountingRuntime {
+                starts: fallback_starts.clone(),
+                interrupted: false,
+                fail_message: None,
+            }),
+        );
+
+        let turn = runtime
+            .start_turn(RuntimeTurnRequest {
+                prompt: "hello".to_string(),
+                runtime_session_ref: None,
+                agent_kind: Some("claude_code".to_string()),
+                workspace_path: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        let result = turn.completion.await.unwrap();
+        assert!(result.is_err());
+        let error_text = result.unwrap_err().to_string();
+        assert!(error_text.contains("fallback is disabled"));
+        assert_eq!(primary_starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fallback_starts.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn primary_error_does_not_fallback_for_codex() {
+        let primary_starts = Arc::new(AtomicUsize::new(0));
+        let fallback_starts = Arc::new(AtomicUsize::new(0));
+        let runtime = FallbackRuntime::new(
+            Arc::new(CountingRuntime {
+                starts: primary_starts.clone(),
+                interrupted: false,
+                fail_message: Some("exec_json bootstrap failed"),
+            }),
+            Arc::new(CountingRuntime {
+                starts: fallback_starts.clone(),
+                interrupted: false,
+                fail_message: None,
+            }),
+        );
+
+        let turn = runtime
+            .start_turn(RuntimeTurnRequest {
+                prompt: "hello".to_string(),
+                runtime_session_ref: None,
+                agent_kind: Some("codex".to_string()),
+                workspace_path: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        let result = turn.completion.await.unwrap();
+        assert!(result.is_err());
+        let error_text = result.unwrap_err().to_string();
+        assert!(error_text.contains("fallback is disabled"));
         assert_eq!(primary_starts.load(Ordering::SeqCst), 1);
         assert_eq!(fallback_starts.load(Ordering::SeqCst), 0);
     }
