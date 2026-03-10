@@ -4,4 +4,16 @@
 /gateway/node_modules/
 /workspace/
 .DS_Store
+**/.DS_Store
+._*
+**/._*
+node_modules/
+**/node_modules/
+dist/
+build/
+bin/
+*.so
+*.dylib
+*.dll
+*.exe
 .claude
