@@ -171,9 +171,7 @@ impl CoreService {
             .context("resolve session failed")?;
         let selection = self.ensure_runtime_selection(&session).await?;
         let selected_runtime_id = selection.selected_runtime_id.as_deref().ok_or_else(|| {
-            anyhow!(
-                "当前还没有选定会话，请先执行 `/runtime use <claude|codex>`，然后用 `/runtime pick <short_id>` 或 `/runtime new`。"
-            )
+            anyhow!(missing_runtime_selection_message(&selection))
         })?;
         let runtime = self
             .persistence
@@ -1044,7 +1042,9 @@ fn normalize_proxy_url(
     let cleaned = request_proxy_url
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_string);
+        .map(extract_proxy_url)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     match proxy_mode {
         "off" => Ok(None),
         "on" => Ok(Some(
@@ -1055,6 +1055,34 @@ fn normalize_proxy_url(
         "default" => Ok(cleaned.or_else(|| default_proxy_url.map(str::to_string))),
         other => Err(anyhow!("unsupported proxy mode: {}", other)),
     }
+}
+
+fn extract_proxy_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some((label, target)) = parse_markdown_link(trimmed) {
+        if label == target || trim_trailing_slash(&label) == trim_trailing_slash(&target) {
+            return label;
+        }
+    }
+    trimmed.to_string()
+}
+
+fn parse_markdown_link(value: &str) -> Option<(String, String)> {
+    let open_bracket = value.find('[')?;
+    let close_bracket = value[open_bracket + 1..].find(']')? + open_bracket + 1;
+    let open_paren = value[close_bracket + 1..].find('(')? + close_bracket + 1;
+    let close_paren = value[open_paren + 1..].rfind(')')? + open_paren + 1;
+    if open_bracket != 0 || open_paren != close_bracket + 1 || close_paren != value.len() - 1 {
+        return None;
+    }
+    Some((
+        value[open_bracket + 1..close_bracket].to_string(),
+        value[open_paren + 1..close_paren].to_string(),
+    ))
+}
+
+fn trim_trailing_slash(value: &str) -> String {
+    value.trim_end_matches('/').to_string()
 }
 
 fn shorten_history_line(value: &str) -> String {
@@ -1074,6 +1102,13 @@ fn selector_summary(selection: &RuntimeSelection) -> RuntimeSelectorSummary {
         proxy_mode: selection.proxy_mode.clone(),
         proxy_url: selection.proxy_url.clone(),
     }
+}
+
+fn missing_runtime_selection_message(selection: &RuntimeSelection) -> String {
+    format!(
+        "当前还没有选定会话。当前 agent 为 `{}`，workspace 为 `{}`。`/runtime use <claude|codex>` 和 `/runtime cwd <path>` 可以按任意顺序调整，准备好后再执行 `/runtime pick <short_id>` 或 `/runtime new`。",
+        selection.agent_kind, selection.workspace_path
+    )
 }
 
 fn runtime_summary(runtime: &RuntimeInstance, selected_runtime_id: Option<&str>) -> RuntimeSummary {
@@ -2177,6 +2212,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accept_turn_rejection_message_treats_agent_and_workspace_as_parallel_prerequisites() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let service = build_service(runtime, sink).await;
+
+        let err = service
+            .accept_turn(CoreTurnRequest {
+                turn_id: "turn_missing_runtime".to_string(),
+                session_key: "control:missing-runtime".to_string(),
+                parent_session_key: None,
+                text: "hello".to_string(),
+            })
+            .await
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("当前还没有选定会话"));
+        assert!(message.contains("可以按任意顺序调整"));
+        assert!(message.contains("/runtime cwd <path>"));
+        assert!(message.contains("/runtime pick <short_id>` 或 `/runtime new`"));
+    }
+
+    #[tokio::test]
     async fn switch_runtime_accepts_short_runtime_prefix() {
         let sink = Arc::new(MockSink::default());
         let runtime = Arc::new(MockRuntime {
@@ -2579,6 +2642,39 @@ mod tests {
         assert_eq!(
             response.selector.as_ref().unwrap().proxy_url.as_deref(),
             Some("http://127.0.0.1:8888")
+        );
+    }
+
+    #[tokio::test]
+    async fn control_strips_markdown_wrapper_from_proxy_url() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let service = build_service(runtime, sink).await;
+
+        let response = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:proxy-markdown".to_string(),
+                parent_session_key: None,
+                action: ControlAction::SetProxy,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: Some("on".to_string()),
+                proxy_url: Some("[http://127.0.0.1:7890](http://127.0.0.1:7890/)".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.selector.as_ref().unwrap().proxy_mode, "on");
+        assert_eq!(
+            response.selector.as_ref().unwrap().proxy_url.as_deref(),
+            Some("http://127.0.0.1:7890")
         );
     }
 

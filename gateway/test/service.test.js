@@ -142,7 +142,7 @@ test('pair command updates pair store', async () => {
   assert.equal(calls.replies.length, 1);
 });
 
-test('core event updates existing cardkit card for the same slot', async () => {
+test('progress slot sends a new plain text message for each intermediate update', async () => {
   const { service, calls } = makeService();
   await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -184,8 +184,261 @@ test('core event updates existing cardkit card for the same slot', async () => {
     },
   });
 
+  assert.equal(calls.cardReplies, undefined);
+  assert.equal(calls.cardUpdates, undefined);
+  assert.equal(calls.replies.length, 2);
+  assert.match(calls.replies[0].rendered.content.text, /first/);
+  assert.match(calls.replies[1].rendered.content.text, /second/);
+});
+
+test('todo slot keeps updating the same cardkit card', async () => {
+  const { service, calls } = makeService();
+  await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_hb',
+      chat_id: 'oc_hb',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  });
+
+  const turnId = calls.submits[0].turn_id;
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'todo',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Todo',
+        theme: 'orange',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'working' }],
+      },
+    },
+  });
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'todo',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Todo',
+        theme: 'orange',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'done' }],
+      },
+    },
+  });
+
   assert.equal(calls.cardReplies.length, 1);
   assert.equal(calls.cardUpdates.length, 1);
+  assert.match(calls.cardUpdates[0].card.body.elements[0].content, /done/);
+});
+
+test('card heartbeat prepends waiting marker to existing todo streaming card', async () => {
+  const { service, calls } = makeService();
+  await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_hb',
+      chat_id: 'oc_hb',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  });
+
+  const turnId = calls.submits[0].turn_id;
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'todo',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Todo',
+        theme: 'orange',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'working' }],
+      },
+    },
+  });
+
+  await service.sendCardHeartbeat(turnId, 'todo');
+
+  assert.equal(calls.cardUpdates.length, 1);
+  assert.match(calls.cardUpdates[0].card.body.elements[0].content, /正在等待-1/);
+});
+
+test('todo card update failure falls back to plain text without affecting progress or final delivery', async () => {
+  const { service, calls } = makeService({
+    feishuClient: {
+      async replyToMessage(messageId, rendered) {
+        calls.replies.push({ messageId, rendered });
+        return `reply_${calls.replies.length}`;
+      },
+      async replyCardKitToMessage(messageId, card) {
+        calls.cardReplies = calls.cardReplies || [];
+        calls.cardReplies.push({ messageId, card });
+        return { messageId: `reply_${(calls.cardReplies || []).length}`, cardId: `card_${(calls.cardReplies || []).length}` };
+      },
+      async updateMessage(messageId, rendered) {
+        calls.updates.push({ messageId, rendered });
+        return messageId;
+      },
+      async updateCard() {
+        throw new Error('feishu request failed status=200 code=300309 msg=ErrMsg: streaming mode is closed; ');
+      },
+      async sendToOpenId() {
+        return 'notify_1';
+      },
+      async sendCardKitToOpenId() {
+        return { messageId: 'notify_1', cardId: 'card_notify_1' };
+      },
+    },
+  });
+
+  await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_fallback',
+      chat_id: 'oc_fallback',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  });
+
+  const turnId = calls.submits[0].turn_id;
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'progress',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Progress',
+        theme: 'blue',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'first card body' }],
+      },
+    },
+  });
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'todo',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Todo',
+        theme: 'orange',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'todo first body' }],
+      },
+    },
+  });
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'todo',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Todo',
+        theme: 'orange',
+        wide_screen_mode: true,
+        update_multi: true,
+        blocks: [{ kind: 'markdown', text: 'todo updated body' }],
+      },
+    },
+  });
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'final',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Final',
+        theme: 'green',
+        wide_screen_mode: true,
+        update_multi: false,
+        blocks: [{ kind: 'markdown', text: 'final body' }],
+      },
+    },
+  });
+
+  assert.equal(calls.replies.length, 3);
+  assert.match(calls.replies[0].rendered.content.text, /first card body/);
+  assert.match(calls.replies[1].rendered.content.text, /卡片更新失败/);
+  assert.match(calls.replies[2].rendered.content.text, /todo updated body/);
+  assert.equal(calls.cardReplies.length, 2);
+  assert.match(calls.cardReplies[1].card.body.elements[0].content, /final body/);
+});
+
+test('final card delivery failure falls back to plain text instead of crashing', async () => {
+  const { service, calls } = makeService({
+    feishuClient: {
+      async replyToMessage(messageId, rendered) {
+        calls.replies.push({ messageId, rendered });
+        return `reply_${calls.replies.length}`;
+      },
+      async replyCardKitToMessage(messageId, card) {
+        calls.cardReplies = calls.cardReplies || [];
+        calls.cardReplies.push({ messageId, card });
+        if (card.body.elements[0].content.includes('final body')) {
+          throw new Error('feishu request failed status=504 code=0 msg=timeout');
+        }
+        return { messageId: `reply_${calls.cardReplies.length}`, cardId: `card_${calls.cardReplies.length}` };
+      },
+      async updateMessage(messageId, rendered) {
+        calls.updates.push({ messageId, rendered });
+        return messageId;
+      },
+      async updateCard(cardId, card, sequence) {
+        calls.cardUpdates = calls.cardUpdates || [];
+        calls.cardUpdates.push({ cardId, card, sequence });
+        return cardId;
+      },
+      async sendToOpenId() {
+        return 'notify_1';
+      },
+      async sendCardKitToOpenId() {
+        return { messageId: 'notify_1', cardId: 'card_notify_1' };
+      },
+    },
+  });
+
+  await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_final_fallback',
+      chat_id: 'oc_final_fallback',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  });
+
+  const turnId = calls.submits[0].turn_id;
+  await service.handleCoreEvent({
+    turn_id: turnId,
+    slot: 'final',
+    message: {
+      kind: 'card',
+      card: {
+        title: 'Final',
+        theme: 'green',
+        wide_screen_mode: true,
+        update_multi: false,
+        blocks: [{ kind: 'markdown', text: 'final body' }],
+      },
+    },
+  });
+
+  assert.equal(calls.cardReplies.length, 1);
+  assert.equal(calls.replies.length, 2);
+  assert.match(calls.replies[0].rendered.content.text, /卡片更新失败/);
+  assert.match(calls.replies[1].rendered.content.text, /final body/);
 });
 
 test('runtime control command is routed to core control api instead of normal turn api', async () => {
@@ -204,6 +457,45 @@ test('runtime control command is routed to core control api instead of normal tu
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.cardReplies.length, 1);
+});
+
+test('common typo /rumtime cwd is still routed to core control api', async () => {
+  const { service, calls } = makeService();
+  const result = await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_cwd_typo',
+      chat_id: 'oc_cwd_typo',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: '/rumtime cwd ~/MultiPerspectiveCloneEval' }),
+    },
+  });
+
+  assert.equal(result.kind, 'control');
+  assert.equal(calls.submits.length, 0);
+  assert.equal(calls.controls.length, 1);
+  assert.equal(calls.controls[0].action, 'set_workspace');
+  assert.equal(calls.controls[0].workspace_path, '~/MultiPerspectiveCloneEval');
+});
+
+test('runtime proxy command accepts shorthand url without explicit on', async () => {
+  const { service, calls } = makeService();
+  const result = await service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_proxy_short',
+      chat_id: 'oc_proxy_short',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: '/runtime proxy http://127.0.0.1:7890' }),
+    },
+  });
+
+  assert.equal(result.kind, 'control');
+  assert.equal(calls.submits.length, 0);
+  assert.equal(calls.controls.length, 1);
+  assert.equal(calls.controls[0].action, 'set_proxy');
+  assert.equal(calls.controls[0].proxy_mode, 'on');
+  assert.equal(calls.controls[0].proxy_url, 'http://127.0.0.1:7890');
 });
 
 test('runtime help command is handled in gateway without calling core', async () => {

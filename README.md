@@ -55,6 +55,13 @@ Feishu card delivery now uses `CardKit`:
 2. sends an `interactive` message that references `card_id`
 3. updates card content through `cardkit` element/settings APIs
 
+Feishu rendering policy:
+
+1. `progress` slot is always downgraded to plain text replies; each core intermediate update becomes a new Feishu message
+2. `todo` slot keeps using a shared CardKit card with in-place updates
+3. `final` slot keeps using a result CardKit card
+4. if `todo` or `final` card delivery/update times out or fails, gateway falls back to plain text for that slot instead of aborting the turn
+
 ## Local Start
 
 ```bash
@@ -125,6 +132,8 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 ```
 
 The live Feishu smoke only verifies official API auth/token acquisition unless you provide a real paired recipient for delivery tests.
+
+The default `codex` ACP launcher explicitly installs both `@zed-industries/codex-acp@0.9.2` and `@zed-industries/codex-acp-linux-x64@0.9.2` so the Linux binary is always present.
 
 ## Runtime 控制命令
 

@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
     let cmd = std::env::args()
         .nth(1)
         .unwrap_or_else(|| {
-            "npx -y @zed-industries/codex-acp@0.9.4 -c approval_policy=never -c sandbox_mode=\"danger-full-access\""
+            "npx -y -p @zed-industries/codex-acp@0.9.2 -p @zed-industries/codex-acp-linux-x64@0.9.2 codex-acp -c approval_policy=never -c sandbox_mode=\"danger-full-access\""
                 .to_string()
         });
     let prompt = std::env::args()

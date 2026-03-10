@@ -90,12 +90,14 @@ Request:
 
 说明：
 
+- `progress` 槽位即使收到 `kind=card`，gateway 也会降级成普通文本消息发送，并且每次中间更新都会追加一条新消息
 - `text / post / raw` 仍走普通 `im/v1/messages` 消息接口
-- `card` 现在走 Feishu `CardKit`：
+- `todo` / `final` 等卡片槽位继续走 Feishu `CardKit`：
   1. `POST /open-apis/cardkit/v1/cards`
   2. `POST /open-apis/im/v1/messages/...` 引用 `card_id`
   3. `PUT /open-apis/cardkit/v1/cards/{card_id}/elements/content/content`
   4. `PATCH /open-apis/cardkit/v1/cards/{card_id}/settings`
+- 若 `todo` / `final` 卡片发送或更新失败，gateway 会自动回退为普通文本消息继续发送
 
 ## Gateway Local APIs
 

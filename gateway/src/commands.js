@@ -8,7 +8,7 @@ function parseControlCommand(text) {
   const normalizedHead = head.toLowerCase();
   const normalizedAction = (action || '').toLowerCase();
 
-  if (['/runtime', 'runtime', '/rt', '会话'].includes(normalizedHead)) {
+  if (['/runtime', 'runtime', '/rt', '/rumtime', 'rumtime', '会话'].includes(normalizedHead)) {
     if (!normalizedAction || ['help', '帮助'].includes(normalizedAction)) {
       return { local_action: 'runtime_help' };
     }
@@ -67,6 +67,13 @@ function parseControlCommand(text) {
         return invalidRuntimeCommand('缺少代理模式。用法：`/runtime proxy <default|on|off> [proxy_url]`');
       }
       const [mode, ...proxyRest] = rest;
+      if (looksLikeProxyUrl(mode)) {
+        return {
+          action: 'set_proxy',
+          proxy_mode: 'on',
+          proxy_url: mode,
+        };
+      }
       return {
         action: 'set_proxy',
         proxy_mode: mode || null,
@@ -85,6 +92,11 @@ function invalidRuntimeCommand(message) {
     local_action: 'runtime_invalid',
     message,
   };
+}
+
+function looksLikeProxyUrl(value) {
+  const text = String(value || '').trim();
+  return /^(https?|socks5):\/\//i.test(text) || /^\[(https?|socks5):\/\/.+\]\((https?|socks5):\/\/.+\)$/i.test(text);
 }
 
 function renderControlResponse(response) {
@@ -272,4 +284,5 @@ module.exports = {
   renderRuntimeHelp,
   runtimeDisplayId,
   invalidRuntimeCommand,
+  looksLikeProxyUrl,
 };

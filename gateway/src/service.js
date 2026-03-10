@@ -2,8 +2,10 @@ const crypto = require('node:crypto');
 
 const { parseControlCommand, renderControlResponse, renderHistoryOverview, renderRuntimeHelp } = require('./commands');
 const { isAuthorized, parsePairCommand, unauthorizedHint, validatePairRequest } = require('./feishu/auth');
-const { renderOutboundMessage } = require('./feishu/render');
+const { renderCardMarkdown, renderOutboundMessage } = require('./feishu/render');
 const { buildSessionRoute, normalizeFeishuEvent } = require('./feishu/session');
+
+const CARD_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 
 class GatewayService {
   constructor({ config, feishuClient, coreClient, pairings, logger = console }) {
@@ -79,6 +81,7 @@ class GatewayService {
       openId: inbound.openId,
       route,
       createdAt: Date.now(),
+      cardFallbackSlots: new Set(),
     });
 
     try {
@@ -103,31 +106,49 @@ class GatewayService {
       return { ignored: true, reason: 'missing_turn_context' };
     }
 
-    const rendered = renderOutboundMessage(event.message);
     const slotKey = event.slot;
+    const rendered = shouldUsePlainMessageTransport(context, slotKey, event.message)
+      ? renderFallbackMessage(event.message)
+      : renderOutboundMessage(event.message);
     const slotState = context.slotStates.get(slotKey);
 
     if (rendered.transport === 'cardkit') {
-      if (slotState && slotState.cardId) {
-        const nextSequence = (slotState.sequence || 0) + 2;
-        await this.feishuClient.updateCard(slotState.cardId, rendered.card, nextSequence);
-        context.slotStates.set(slotKey, {
-          ...slotState,
-          sequence: nextSequence,
-        });
-        return { updated: true, messageId: slotState.messageId, cardId: slotState.cardId };
-      }
+      try {
+        if (slotState && slotState.cardId) {
+          const nextSequence = (slotState.sequence || 0) + 2;
+          await this.feishuClient.updateCard(slotState.cardId, rendered.card, nextSequence);
+          this.updateSlotState(context, slotKey, {
+            ...slotState,
+            sequence: nextSequence,
+            lastCard: rendered.card,
+          });
+          this.scheduleCardHeartbeat(event.turn_id, slotKey);
+          return { updated: true, messageId: slotState.messageId, cardId: slotState.cardId };
+        }
 
-      const sent = await this.feishuClient.replyCardKitToMessage(context.replyToMessageId, rendered.card);
-      context.slotStates.set(slotKey, {
-        messageId: sent.messageId,
-        cardId: sent.cardId,
-        sequence: 1,
-      });
-      return { sent: true, messageId: sent.messageId, cardId: sent.cardId };
+        const sent = await this.feishuClient.replyCardKitToMessage(context.replyToMessageId, rendered.card);
+        this.updateSlotState(context, slotKey, {
+          messageId: sent.messageId,
+          cardId: sent.cardId,
+          sequence: 1,
+          lastCard: rendered.card,
+          heartbeatCount: 0,
+        });
+        this.scheduleCardHeartbeat(event.turn_id, slotKey);
+        return { sent: true, messageId: sent.messageId, cardId: sent.cardId };
+      } catch (error) {
+        this.logger.error?.('[gateway] card delivery failed, falling back to message transport', error);
+        return this.fallbackSlotToMessages(
+          context,
+          slotKey,
+          event.message,
+          '卡片更新失败，已切换为普通消息继续回传。',
+        );
+      }
     }
 
-    const existingMessageId = slotState && slotState.messageId;
+    this.clearHeartbeat(context, slotKey);
+    const existingMessageId = slotKey === 'progress' ? null : slotState && slotState.messageId;
     if (existingMessageId && rendered.msg_type === 'interactive') {
       await this.feishuClient.updateMessage(existingMessageId, rendered);
       return { updated: true, messageId: existingMessageId };
@@ -135,7 +156,7 @@ class GatewayService {
 
     const sentMessageId = await this.feishuClient.replyToMessage(context.replyToMessageId, rendered);
     if (sentMessageId) {
-      context.slotStates.set(slotKey, {
+      this.updateSlotState(context, slotKey, {
         messageId: sentMessageId,
         cardId: null,
         sequence: 0,
@@ -183,6 +204,161 @@ class GatewayService {
     }
     return this.feishuClient.replyToMessage(messageId, rendered);
   }
+
+  updateSlotState(context, slotKey, nextState) {
+    const prev = context.slotStates.get(slotKey);
+    if (prev && prev.heartbeatTimer && prev.heartbeatTimer !== nextState.heartbeatTimer) {
+      clearTimeout(prev.heartbeatTimer);
+    }
+    context.slotStates.set(slotKey, {
+      heartbeatCount: 0,
+      ...prev,
+      ...nextState,
+    });
+  }
+
+  scheduleCardHeartbeat(turnId, slotKey) {
+    const context = this.turnContexts.get(turnId);
+    if (!context || context.cardFallbackSlots.has(slotKey)) {
+      return;
+    }
+    const slotState = context.slotStates.get(slotKey);
+    if (!slotState || !slotState.cardId || !slotState.lastCard || !slotState.lastCard.config?.streaming_mode) {
+      return;
+    }
+    if (slotState.heartbeatTimer) {
+      clearTimeout(slotState.heartbeatTimer);
+    }
+    const heartbeatTimer = setTimeout(() => {
+      this.sendCardHeartbeat(turnId, slotKey).catch((error) => {
+        this.logger.error?.('[gateway] card heartbeat failed', error);
+      });
+    }, CARD_HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref?.();
+    this.updateSlotState(context, slotKey, { heartbeatTimer });
+  }
+
+  clearHeartbeat(context, slotKey) {
+    const slotState = context.slotStates.get(slotKey);
+    if (!slotState || !slotState.heartbeatTimer) {
+      return;
+    }
+    clearTimeout(slotState.heartbeatTimer);
+    context.slotStates.set(slotKey, {
+      ...slotState,
+      heartbeatTimer: null,
+    });
+  }
+
+  async sendCardHeartbeat(turnId, slotKey) {
+    const context = this.turnContexts.get(turnId);
+    if (!context || context.cardFallbackSlots.has(slotKey)) {
+      return;
+    }
+    const slotState = context.slotStates.get(slotKey);
+    if (!slotState || !slotState.cardId || !slotState.lastCard) {
+      return;
+    }
+    const heartbeatCount = (slotState.heartbeatCount || 0) + 1;
+    const heartbeatCard = prependHeartbeat(slotState.lastCard, heartbeatCount);
+    try {
+      const nextSequence = (slotState.sequence || 0) + 2;
+      await this.feishuClient.updateCard(slotState.cardId, heartbeatCard, nextSequence);
+      this.updateSlotState(context, slotKey, {
+        sequence: nextSequence,
+        lastCard: heartbeatCard,
+        heartbeatCount,
+      });
+      this.scheduleCardHeartbeat(turnId, slotKey);
+    } catch (error) {
+      await this.fallbackSlotToMessages(
+        context,
+        slotKey,
+        { kind: 'card', card: heartbeatCard },
+        `卡片流式更新已超时，已切换为普通消息继续回传。`,
+      );
+    }
+  }
+
+  async fallbackSlotToMessages(context, slotKey, message, reasonText) {
+    context.cardFallbackSlots.add(slotKey);
+    this.clearHeartbeat(context, slotKey);
+    if (reasonText) {
+      await this.feishuClient.replyToMessage(context.replyToMessageId, {
+        msg_type: 'text',
+        content: { text: reasonText },
+      });
+    }
+    const rendered = renderFallbackMessage(message);
+    const sentMessageId = await this.feishuClient.replyToMessage(context.replyToMessageId, rendered);
+    this.updateSlotState(context, slotKey, {
+      messageId: sentMessageId,
+      cardId: null,
+      sequence: 0,
+      lastCard: null,
+      heartbeatTimer: null,
+    });
+    return { sent: true, messageId: sentMessageId, fallback: true };
+  }
+}
+
+function shouldUsePlainMessageTransport(context, slotKey, message) {
+  if (slotKey === 'progress') {
+    return true;
+  }
+  return context.cardFallbackSlots.has(slotKey) || message.kind !== 'card';
+}
+
+function renderFallbackMessage(message) {
+  switch (message.kind) {
+    case 'text':
+      return { transport: 'message', msg_type: 'text', content: { text: message.text } };
+    case 'post':
+      return {
+        transport: 'message',
+        msg_type: 'text',
+        content: { text: `${message.title}\n\n${message.text}`.trim() },
+      };
+    case 'card':
+      return {
+        transport: 'message',
+        msg_type: 'text',
+        content: { text: renderCardMarkdown(message.card) || '[empty card]' },
+      };
+    case 'raw':
+      return {
+        transport: 'message',
+        msg_type: 'text',
+        content: { text: JSON.stringify(message.content) },
+      };
+    default:
+      return {
+        transport: 'message',
+        msg_type: 'text',
+        content: { text: '[unsupported message]' },
+      };
+  }
+}
+
+function prependHeartbeat(cardkitCard, heartbeatCount) {
+  const elements = Array.isArray(cardkitCard?.body?.elements) ? cardkitCard.body.elements : [];
+  if (elements.length === 0) {
+    return cardkitCard;
+  }
+  const first = elements[0];
+  if (first.tag !== 'markdown') {
+    return cardkitCard;
+  }
+  const nextCard = structuredClone(cardkitCard);
+  nextCard.body.elements[0].content = [
+    `**正在等待-${heartbeatCount}**`,
+    '',
+    first.content || '',
+  ].join('\n');
+  if (nextCard.config?.summary) {
+    nextCard.config.summary.content = `正在等待-${heartbeatCount}`;
+  }
+  return nextCard;
 }
 
 function extractCoreError(error) {

@@ -33,6 +33,7 @@
 - `RUNTIME_MODE`: `acp | exec_json | acp_fallback`
 - `ACP_ADAPTER`: `claude_code | codex`，默认 `claude_code`
 - `ACP_AGENT_CMD`: 显式覆盖 ACP 启动命令
+- `codex` 默认 launcher 会显式安装 `@zed-industries/codex-acp@0.9.2` 与 `@zed-industries/codex-acp-linux-x64@0.9.2`，避免 `npx` 漏装平台 binary
 - `CODEX_BIN`: `codex` 可执行文件
 - `CODEX_WORKDIR`: runtime 工作目录
 - `CODEX_MODEL`: 可选模型名
