@@ -10,6 +10,8 @@
    这样不同平台可以按自己的线程/群聊模型决定会话边界。
 4. `OutboundMessage` 保持最小标准化。
    Rust 不直接输出飞书卡片 JSON，只输出通用文本、post、card、raw 四类消息。
+5. 本地配置入口统一收敛到 `remoteagent` CLI。
+   原因：飞书凭据、代理、默认 agent、ACP 安装与启动脚本原先分散在多个文件里，用户很难以“控制台工具”的方式部署和维护。
 
 ## Session 设计
 
@@ -74,7 +76,7 @@
 代理策略：
 
 1. 代理配置保存在当前 `runtime_selection` 中。
-2. `default` 下按 agent 默认值生效：`codex=on`，`claude_code=off`。
+2. `default` 下按环境配置生效：`CODEX_DEFAULT_PROXY_MODE` 与 `CLAUDE_CODE_DEFAULT_PROXY_MODE`。
 3. `on` 时会注入 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY`。
 4. 代理地址优先取命令里显式传入，其次取 `ACP_PROXY_URL`，再回退现有代理环境变量。
 5. `/runtime stop` 对 ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾；如果 agent 在宽限时间内没有结束，再做强制中断。
@@ -126,6 +128,19 @@ ACP 结束语义：
    用于本轮最终结果。
 
 gateway 对 `todo` / `final` 维护自己的 Feishu 卡片状态，优先对交互式卡片执行 update；`progress` 不复用消息，而是每次中间更新都追加一条普通文本消息。
+
+## 本地控制台工具
+
+`remoteagent` CLI 当前覆盖：
+
+1. `configure`
+   交互式写入飞书连接方式、`APP_ID/APP_SECRET`、认证模式、默认 workspace、默认代理和 per-agent 默认代理。
+2. `install-acp`
+   扫描 `claude_code` 与 `codex` ACP runtime，缺失时用 npm 安装。
+3. `doctor`
+   汇总 env、ACP 可用性、PID 与健康检查。
+4. `start/stop/restart/status`
+   复用现有脚本管理本地服务。
 
 ## 飞书消息呈现
 

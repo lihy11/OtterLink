@@ -135,6 +135,7 @@ impl AcpRuntime {
             request.proxy_mode.as_deref(),
             request.proxy_url.as_deref(),
             self.config.acp_proxy_url.as_deref(),
+            self.config.default_proxy_mode_for_agent(adapter_id),
         );
         self.worker_for_key(key).await
     }
@@ -150,6 +151,7 @@ impl AcpRuntime {
             query.proxy_mode.as_deref(),
             query.proxy_url.as_deref(),
             self.config.acp_proxy_url.as_deref(),
+            self.config.default_proxy_mode_for_agent(adapter_id),
         );
         self.worker_for_key(key).await
     }
@@ -666,8 +668,9 @@ fn build_worker_key(
     proxy_mode: Option<&str>,
     proxy_url: Option<&str>,
     default_proxy_url: Option<&str>,
+    default_proxy_mode: &str,
 ) -> WorkerKey {
-    let proxy_mode = effective_proxy_mode(proxy_mode, adapter_id).to_string();
+    let proxy_mode = effective_proxy_mode(proxy_mode, default_proxy_mode).to_string();
     let proxy_url = if proxy_mode == "on" {
         proxy_url
             .or(default_proxy_url)
@@ -702,12 +705,11 @@ fn apply_proxy_env(cmd: &mut Command, key: &WorkerKey) {
     }
 }
 
-fn effective_proxy_mode(proxy_mode: Option<&str>, agent_kind: &str) -> &'static str {
+fn effective_proxy_mode<'a>(proxy_mode: Option<&'a str>, default_proxy_mode: &'a str) -> &'a str {
     match proxy_mode.unwrap_or("default") {
         "on" => "on",
         "off" => "off",
-        _ if agent_kind == "codex" => "on",
-        _ => "off",
+        _ => default_proxy_mode,
     }
 }
 

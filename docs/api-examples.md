@@ -94,6 +94,12 @@ curl -X POST http://127.0.0.1:1127/internal/notify \
 ## 脚本
 
 ```bash
+./scripts/install-one-click.sh
+remoteagent configure
+remoteagent install-acp all --if-missing
+remoteagent doctor
+remoteagent start
+remoteagent status
 ./scripts/start-longconn.sh
 ./scripts/stop-longconn.sh
 ./scripts/send-notify.sh 'hello'
@@ -127,3 +133,16 @@ curl -X POST http://127.0.0.1:1127/internal/notify \
 4. `/runtime pick` 如果命中已有 session，除了控制结果表格外，还会额外回一张 `历史概览` 卡片，展示裁剪后的最近 5 轮 `user / assistant` 对话。
 5. `/runtime stop` 会停止当前正在运行的 turn；ACP 会发 `session/cancel`，`exec_json` 会终止本地进程。
 6. `/runtime proxy` 会控制后续 ACP/exec 启动时是否注入代理环境变量。
+
+## 控制台配置覆盖项
+
+`remoteagent configure` 当前会写入这些关键配置：
+
+- 飞书 `APP_ID / APP_SECRET`
+- 是否启用 Feishu WebSocket 长连接
+- `FEISHU_AUTH_MODE`
+- `ACP_ADAPTER`
+- `CODEX_WORKDIR`
+- `ACP_PROXY_URL`
+- `CLAUDE_CODE_DEFAULT_PROXY_MODE`
+- `CODEX_DEFAULT_PROXY_MODE`

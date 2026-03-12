@@ -1687,6 +1687,7 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use tokio::sync::{mpsc, Mutex};
+    use tokio::time::Duration;
 
     use super::*;
     use crate::{
@@ -1818,6 +1819,8 @@ mod tests {
             claude_home_dir,
             codex_home_dir,
             acp_proxy_url: Some("http://127.0.0.1:7890".to_string()),
+            claude_code_default_proxy_mode: "off".to_string(),
+            codex_default_proxy_mode: "on".to_string(),
             codex_bin: "codex".to_string(),
             codex_workdir,
             codex_model: None,

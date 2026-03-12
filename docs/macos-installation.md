@@ -16,7 +16,14 @@
 
 ## 一键安装并启动
 
-确保 `.run/feishu.env` 已写好，然后执行：
+推荐先用控制台工具生成 `.run/feishu.env`：
+
+```bash
+./scripts/install-one-click.sh
+remoteagent configure
+```
+
+然后执行：
 
 ```bash
 ./scripts/install-launchd.sh

@@ -25,7 +25,7 @@
 10. `acp.md`
    ACP 功能与官方文档的逐项映射。
 
-最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`，以及代理注入策略。
+最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `remoteagent` 控制台工具与一键安装脚本。
 
 ## 背景资料
 
@@ -58,3 +58,5 @@
 - `../deploy/systemd/remoteagent.env.example`
 - `../deploy/launchd/com.remoteagent.core.plist`
 - `../deploy/launchd/com.remoteagent.gateway.plist`
+- `../scripts/install-one-click.sh`
+- `../scripts/remoteagent-cli.js`

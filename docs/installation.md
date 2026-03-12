@@ -29,6 +29,23 @@ apt-get install -y nodejs build-essential pkg-config libssl-dev
 - 本机可执行的 `claude` / `codex` / ACP agent
 - 真实 `~/.claude`，如果要导入 Claude 历史 session
 
+## 一键安装
+
+源码克隆完成后，推荐直接执行：
+
+```bash
+./scripts/install-one-click.sh
+```
+
+它会：
+
+1. 编译 Rust release binary
+2. 安装 gateway 的 npm 依赖
+3. 安装 `remoteagent` 控制台命令到 `~/.local/bin/remoteagent`
+4. 扫描并预装缺失的 `claude_code` / `codex` ACP runtime
+5. 如果当前机器缺少 Rust 或 Node，则自动安装 Rust `1.94.0` 与 Node `22.22.1`
+6. 在交互式终端中可继续进入 `remoteagent configure` 和 `remoteagent start`
+
 ## 构建
 
 ```bash
@@ -47,6 +64,8 @@ sudo chown -R "$USER":"$(id -gn)" /etc/remoteagent /var/lib/remoteagent
 ```
 
 然后按实际环境修改 `/etc/remoteagent/remoteagent.env`。
+
+若先走本地 CLI 配置，也可以直接把 `.run/feishu.env` 的内容整理后迁移到 `/etc/remoteagent/remoteagent.env`。
 
 如果你需要在飞书里对 `codex` 执行 `/runtime load`，记得把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`。
 
@@ -108,3 +127,5 @@ cargo build --release
 cd gateway && npm ci
 sudo ./scripts/reload-systemd.sh
 ```
+
+若使用源码目录下的本地 CLI 包装器，升级后不需要重新安装命令；`~/.local/bin/remoteagent` 会继续指向当前仓库目录。

@@ -82,7 +82,9 @@ impl AgentRuntime for ExecJsonRuntime {
                 &mut cmd,
                 request.proxy_mode.as_deref(),
                 request.proxy_url.as_deref().or(config.acp_proxy_url.as_deref()),
-                request.agent_kind.as_deref().unwrap_or("codex"),
+                config.default_proxy_mode_for_agent(
+                    request.agent_kind.as_deref().unwrap_or("codex"),
+                ),
             );
 
             let mut child = cmd.spawn().context("failed to spawn codex process")?;
@@ -174,13 +176,12 @@ fn apply_proxy_env(
     cmd: &mut Command,
     proxy_mode: Option<&str>,
     proxy_url: Option<&str>,
-    agent_kind: &str,
+    default_proxy_mode: &str,
 ) {
     let effective_mode = match proxy_mode.unwrap_or("default") {
         "on" => "on",
         "off" => "off",
-        _ if agent_kind == "codex" => "on",
-        _ => "off",
+        _ => default_proxy_mode,
     };
 
     match effective_mode {

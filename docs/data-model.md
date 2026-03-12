@@ -92,9 +92,20 @@ core 进程内还维护：
 
 当前聊天还会保存一份 `runtime_selection`，记录当前选中的 `agent_kind / workspace_path / selected_runtime_id`。
 当前实现同时把 `proxy_mode / proxy_url` 也保存在 `runtime_selection` 中，用于控制后续 runtime 启动时的代理注入。
+当 `proxy_mode=default` 时，最终行为由 env 里的 `CLAUDE_CODE_DEFAULT_PROXY_MODE` / `CODEX_DEFAULT_PROXY_MODE` 决定。
 
 - Claude 回退时优先读取 `sessions-index.json`
 - Claude 没有索引时回退读取目录下的 `*.jsonl`
 - Codex 回退时按 `threads.cwd` 与当前 workspace 匹配导入
 - 导入后的 runtime 仍然存入 `runtime_instances`
 - 当前聊天的 active runtime 不会因为导入而自动切换
+
+## 本地配置文件
+
+`.run/feishu.env` 现在也是正式的数据载体，默认由 `remoteagent configure` 生成和维护，保存：
+
+- 飞书连接参数与 `APP_ID/APP_SECRET`
+- gateway/core token
+- runtime 默认 agent 与 workspace
+- 默认代理 URL
+- `claude_code` / `codex` 各自的默认代理模式

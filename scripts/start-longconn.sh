@@ -4,12 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$ROOT_DIR/.run"
 GATEWAY_DIR="$ROOT_DIR/gateway"
+ENV_FILE="${REMOTEAGENT_ENV_FILE:-$ROOT_DIR/.run/feishu.env}"
 mkdir -p "$RUN_DIR"
 
-if [ -f "$RUN_DIR/feishu.env" ]; then
+if [ -f "$ENV_FILE" ]; then
   set -a
   # shellcheck disable=SC1090
-  source "$RUN_DIR/feishu.env"
+  source "$ENV_FILE"
   set +a
 fi
 
@@ -35,6 +36,9 @@ export CODEX_SKIP_GIT_REPO_CHECK="${CODEX_SKIP_GIT_REPO_CHECK:-true}"
 export RUNTIME_MODE="${RUNTIME_MODE:-acp_fallback}"
 export ACP_ADAPTER="${ACP_ADAPTER:-claude_code}"
 export ACP_AGENT_CMD="${ACP_AGENT_CMD:-}"
+export ACP_PROXY_URL="${ACP_PROXY_URL:-}"
+export CLAUDE_CODE_DEFAULT_PROXY_MODE="${CLAUDE_CODE_DEFAULT_PROXY_MODE:-off}"
+export CODEX_DEFAULT_PROXY_MODE="${CODEX_DEFAULT_PROXY_MODE:-on}"
 export RENDER_MIN_UPDATE_MS="${RENDER_MIN_UPDATE_MS:-700}"
 export TODO_EVENT_LOG_PATH="${TODO_EVENT_LOG_PATH:-$ROOT_DIR/.run/todo-events.jsonl}"
 

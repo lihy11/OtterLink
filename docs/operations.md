@@ -2,6 +2,24 @@
 
 ## 本地启动
 
+推荐入口：
+
+```bash
+remoteagent start
+```
+
+首次部署建议先执行：
+
+```bash
+./scripts/install-one-click.sh
+remoteagent configure
+remoteagent doctor
+```
+
+`install-one-click.sh` 会在缺少依赖时自动安装 Rust `1.94.0` 和 Node `22.22.1`，并把 `~/.cargo/bin`、`~/.local/bin` 接入登录 shell。
+
+兼容保留的原始入口：
+
 ```bash
 source .run/feishu.env
 ./scripts/start-longconn.sh
@@ -85,7 +103,15 @@ tail -f .run/gateway.launchd.log
 ## 停止
 
 ```bash
+remoteagent stop
 ./scripts/stop-longconn.sh
+```
+
+## 状态检查
+
+```bash
+remoteagent status
+remoteagent doctor
 ```
 
 ## 测试
@@ -151,6 +177,8 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
    检查 `CORE_INGEST_TOKEN` 和 `CORE_BASE_URL`。
 6. `systemctl reload` 后服务未恢复
    检查 `journalctl -u remoteagent-core -u remoteagent-gateway -n 200`，确认新 env 或新 binary 是否能正常启动。
+7. CLI 配置后启动仍失败
+   先执行 `remoteagent doctor`，确认 `APP_ID/APP_SECRET`、ACP 安装结果、PID 和 `healthz` 是否正常。
 
 ## 发布前检查
 

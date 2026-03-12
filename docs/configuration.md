@@ -15,6 +15,7 @@
 - `ALLOW_FROM_OPEN_IDS`: 逗号分隔白名单
 - `PAIR_STORE_PATH`: 配对存储路径
 - `FEISHU_DISABLE_WS=1`: 仅启动 HTTP，不连飞书 WebSocket
+- `remoteagent configure` 会交互式维护 `.run/feishu.env`
 - Linux `systemd` 部署时建议统一放进 `/etc/remoteagent/remoteagent.env`
 - macOS `launchd` 默认会读取 `.run/feishu.env`，也可通过 `ENV_FILE=... ./scripts/install-launchd.sh` 覆盖
 
@@ -25,6 +26,8 @@
 - `CLAUDE_HOME_DIR`: Claude 本地 session 根目录，默认 `~/.claude`
 - `CODEX_HOME_DIR`: Codex 本地 session 根目录，默认 `~/.codex`
 - `ACP_PROXY_URL`: 运行时默认代理地址；为空时会回退读取 `ALL_PROXY / HTTPS_PROXY / HTTP_PROXY`
+- `CLAUDE_CODE_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `claude_code` 的默认代理
+- `CODEX_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `codex` 的默认代理
 - `TODO_EVENT_LOG_PATH`: todo 事件日志路径
 - `RENDER_MIN_UPDATE_MS`: progress 卡片最小刷新间隔
 
@@ -55,7 +58,25 @@
 10. `/runtime cwd <path>` 支持绝对路径、`~/...`，以及相对当前服务工作目录的相对路径。
 11. `/runtime stop` 会对当前活动 turn 发停止请求；ACP runtime 走协议取消，`exec_json` 走本地进程终止。
 12. `/runtime proxy <default|on|off> [proxy_url]` 会更新当前选择器的代理模式。
-13. `default` 下 `codex` 会自动注入代理，`claude_code` 默认不注入。
+13. `default` 下会读取 `CLAUDE_CODE_DEFAULT_PROXY_MODE` / `CODEX_DEFAULT_PROXY_MODE`。
+
+## 控制台工具
+
+推荐先执行：
+
+```bash
+./scripts/install-one-click.sh
+remoteagent configure
+remoteagent doctor
+```
+
+控制台工具会：
+
+1. 写入 `.run/feishu.env`
+2. 扫描 ACP runtime
+3. 安装缺失的 `claude_code` / `codex` ACP
+4. 若缺少 Rust / Node，则自动安装 Rust `1.94.0` 与 Node `22.22.1`
+5. 统一执行本地启动/停止/状态检查
 
 ## Linux 推荐路径
 

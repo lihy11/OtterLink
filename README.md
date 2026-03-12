@@ -66,6 +66,18 @@ Feishu rendering policy:
 
 ## Local Start
 
+推荐先安装控制台工具：
+
+```bash
+./scripts/install-one-click.sh
+remoteagent configure
+remoteagent start
+```
+
+控制台工具会统一管理 `.run/feishu.env`、检测 ACP runtime、并提供启动/停止/状态检查。若当前机器缺少 Rust 或 Node，安装脚本会自动补装当前项目默认版本：Rust `1.94.0`、Node `22.22.1`。
+
+传统本地启动仍然可用：
+
 ```bash
 source .run/feishu.env
 ./scripts/start-longconn.sh
@@ -103,6 +115,21 @@ sudo ./scripts/reload-systemd.sh
 ```
 
 `reload` 当前语义是发送 `SIGHUP`，服务会优雅退出并由 `systemd` 自动拉起新进程，适合 env 和 binary 更新后的切换。
+
+## Console Tool
+
+安装脚本会把 `remoteagent` 包装器写到 `~/.local/bin/remoteagent`。常用命令：
+
+```bash
+remoteagent configure
+remoteagent install-acp all --if-missing
+remoteagent doctor
+remoteagent start
+remoteagent stop
+remoteagent status
+```
+
+`configure` 会交互式写入飞书凭据、长连接开关、默认 agent、默认 workspace、默认代理地址，以及 `claude_code` / `codex` 各自的默认代理模式。
 
 ## macOS LaunchAgent
 
@@ -199,5 +226,7 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 - `CLAUDE_HOME_DIR`: Claude 本地 session 根目录，默认 `~/.claude`
 - `CODEX_HOME_DIR`: Codex 本地 session 根目录，默认 `~/.codex`
 - `ACP_PROXY_URL`: 运行时默认代理地址；也会回退读取 `ALL_PROXY / HTTPS_PROXY / HTTP_PROXY`
+- `CLAUDE_CODE_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `claude_code` 的默认代理策略
+- `CODEX_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `codex` 的默认代理策略
 
 See [docs/README.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/README.md) for the full documentation set. ACP-specific protocol mapping is in [docs/acp.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/acp.md). Linux deployment details are in [docs/installation.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/installation.md), and macOS deployment details are in [docs/macos-installation.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/macos-installation.md).

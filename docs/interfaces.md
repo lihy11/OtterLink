@@ -114,6 +114,25 @@ Request:
 ### `POST /internal/notify`
 向显式 `open_id` 或默认已配对用户发送主动消息。
 
+## Local CLI Interface
+
+源码部署后的本地控制台入口为：
+
+```bash
+remoteagent configure
+remoteagent install-acp all --if-missing
+remoteagent doctor
+remoteagent start
+remoteagent stop
+remoteagent status
+```
+
+说明：
+
+- `configure` 负责写 `.run/feishu.env`
+- `install-acp` 负责扫描/安装 `claude_code` 与 `codex` ACP runtime
+- `start/stop` 仍复用仓库脚本，但由统一 CLI 传入 `REMOTEAGENT_ENV_FILE`
+
 ## 标准消息模型
 
 ### `OutboundMessage`

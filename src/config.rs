@@ -14,6 +14,8 @@ pub struct Config {
     pub claude_home_dir: PathBuf,
     pub codex_home_dir: PathBuf,
     pub acp_proxy_url: Option<String>,
+    pub claude_code_default_proxy_mode: String,
+    pub codex_default_proxy_mode: String,
     pub codex_bin: String,
     pub codex_workdir: PathBuf,
     pub codex_model: Option<String>,
@@ -65,6 +67,18 @@ impl Config {
             .or_else(|| env::var("ALL_PROXY").ok().filter(|v| !v.trim().is_empty()))
             .or_else(|| env::var("HTTPS_PROXY").ok().filter(|v| !v.trim().is_empty()))
             .or_else(|| env::var("HTTP_PROXY").ok().filter(|v| !v.trim().is_empty()));
+        let claude_code_default_proxy_mode = parse_proxy_default_mode(
+            env::var("CLAUDE_CODE_DEFAULT_PROXY_MODE")
+                .unwrap_or_else(|_| "off".to_string())
+                .trim(),
+            "CLAUDE_CODE_DEFAULT_PROXY_MODE",
+        )?;
+        let codex_default_proxy_mode = parse_proxy_default_mode(
+            env::var("CODEX_DEFAULT_PROXY_MODE")
+                .unwrap_or_else(|_| "on".to_string())
+                .trim(),
+            "CODEX_DEFAULT_PROXY_MODE",
+        )?;
         let codex_bin = env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
         let codex_workdir = env::var("CODEX_WORKDIR").map(PathBuf::from).unwrap_or(
             env::current_dir()
@@ -101,6 +115,8 @@ impl Config {
             claude_home_dir,
             codex_home_dir,
             acp_proxy_url,
+            claude_code_default_proxy_mode,
+            codex_default_proxy_mode,
             codex_bin,
             codex_workdir,
             codex_model,
@@ -111,5 +127,59 @@ impl Config {
             render_min_update_ms,
             todo_event_log_path,
         })
+    }
+
+    pub fn default_proxy_mode_for_agent(&self, agent_kind: &str) -> &str {
+        match agent_kind {
+            "codex" => &self.codex_default_proxy_mode,
+            "claude_code" => &self.claude_code_default_proxy_mode,
+            _ => "off",
+        }
+    }
+}
+
+fn parse_proxy_default_mode(value: &str, env_name: &str) -> Result<String> {
+    match value {
+        "on" | "off" => Ok(value.to_string()),
+        other => anyhow::bail!("{env_name} must be `on` or `off`, got `{other}`"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_proxy_mode_matches_agent_kind() {
+        let config = Config {
+            core_bind: "127.0.0.1:7211".parse().unwrap(),
+            core_ingest_token: None,
+            gateway_event_url: "http://127.0.0.1:1127/internal/gateway/event".to_string(),
+            gateway_event_token: None,
+            state_db_path: PathBuf::from(".run/state.db"),
+            claude_home_dir: PathBuf::from(".claude"),
+            codex_home_dir: PathBuf::from(".codex"),
+            acp_proxy_url: None,
+            claude_code_default_proxy_mode: "off".to_string(),
+            codex_default_proxy_mode: "on".to_string(),
+            codex_bin: "codex".to_string(),
+            codex_workdir: PathBuf::from("workspace"),
+            codex_model: None,
+            codex_skip_git_repo_check: true,
+            runtime_mode: "acp".to_string(),
+            acp_adapter: "codex".to_string(),
+            acp_agent_cmd: None,
+            render_min_update_ms: 700,
+            todo_event_log_path: PathBuf::from(".run/todo-events.jsonl"),
+        };
+
+        assert_eq!(config.default_proxy_mode_for_agent("codex"), "on");
+        assert_eq!(config.default_proxy_mode_for_agent("claude_code"), "off");
+        assert_eq!(config.default_proxy_mode_for_agent("other"), "off");
+    }
+
+    #[test]
+    fn parse_proxy_default_mode_rejects_invalid_values() {
+        assert!(parse_proxy_default_mode("default", "CLAUDE_CODE_DEFAULT_PROXY_MODE").is_err());
     }
 }

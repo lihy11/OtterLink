@@ -6,6 +6,16 @@
 
 ## 分层
 
+### 0. 本地控制台层
+
+位置：`scripts/remoteagent-cli.js` 与安装包装脚本。
+
+职责：
+1. 生成和维护 `.run/feishu.env`。
+2. 检测并安装 `claude_code` / `codex` ACP runtime。
+3. 统一执行 `start/stop/status/doctor`。
+4. 作为源码部署后的本地运维入口。
+
 ### 1. gateway 层
 
 位置：`gateway/`
@@ -42,12 +52,15 @@
 ```mermaid
 flowchart LR
     User[Feishu User]
+    CLI[remoteagent CLI]
     Gateway[JS Gateway\ngateway/src]
     Core[Rust Core\nsrc/api + src/core]
     Runtime[Agent Runtime\nsrc/agent]
     DB[(SQLite)]
 
     User --> Gateway
+    CLI --> Gateway
+    CLI --> Core
     Gateway -->|CoreTurnRequest| Core
     Core --> Runtime
     Core --> DB
@@ -68,6 +81,7 @@ flowchart LR
 8. core 生成 `progress` / `todo` / `final` 标准消息。
 9. core 回调 gateway 的 `/internal/gateway/event`。
 10. gateway 利用飞书卡片和 reply/update 能力完成展示。
+11. 本地运维通过 `remoteagent` CLI 修改 env、检测 ACP、并调用启动脚本管理 core/gateway。
 
 ## 边界原则
 

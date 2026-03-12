@@ -25,3 +25,4 @@
 6. 当前实现会把 `session/load` 的历史回放缓存成最近对话摘要；当用户执行 `/runtime pick` 选中已有 session 时，gateway 会额外发送一张 `历史概览` 卡片，显示裁剪后的最近 5 轮 `user / assistant` 对话。
 7. `session/list` 是当前 runtime/session 导入的首选路径；本地 sqlite/jsonl 发现只作为不支持该能力时的兼容回退。
 8. 当前还没有实现 ACP `authenticate` 交互流；如果某个 agent 将来要求显式认证，需要按官方认证文档补齐。
+9. `proxy_mode=default` 时不再硬编码为 `codex=on / claude_code=off`，而是读取 `CODEX_DEFAULT_PROXY_MODE` 与 `CLAUDE_CODE_DEFAULT_PROXY_MODE`。
