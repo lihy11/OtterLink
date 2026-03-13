@@ -1,5 +1,11 @@
 # remoteagent
 
+Current product naming direction:
+
+- Chinese name: `水獭`
+- English name: `OtterLink`
+- Naming intent: a friendly local relay agent that stays online, links Feishu with local runtimes, and carries tasks back and forth
+
 `remoteagent` is split into two runtime boundaries:
 
 1. Rust `agent + core`
@@ -75,6 +81,7 @@ remoteagent start
 ```
 
 控制台工具会统一管理 `.run/feishu.env`、检测 ACP runtime、并提供启动/停止/状态检查。若当前机器缺少 Rust 或 Node，安装脚本会自动补装当前项目默认版本：Rust `1.94.0`、Node `22.22.1`。
+`remoteagent start` / `scripts/start-longconn.sh` 现在只负责启动，不再隐式安装 gateway 依赖。
 
 传统本地启动仍然可用：
 

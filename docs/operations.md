@@ -17,6 +17,7 @@ remoteagent doctor
 ```
 
 `install-one-click.sh` 会在缺少依赖时自动安装 Rust `1.94.0` 和 Node `22.22.1`，并把 `~/.cargo/bin`、`~/.local/bin` 接入登录 shell。
+本地启动脚本只负责拉起现有构建产物和依赖，不再在启动过程中执行 `npm install`。
 
 兼容保留的原始入口：
 

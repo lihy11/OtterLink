@@ -18,8 +18,10 @@ for name in gateway rust; do
   fi
 done
 
-pkill -f "target/debug/feishu-acp-bridge-demo|cargo run --bin feishu-acp-bridge-demo" >/dev/null 2>&1 || true
-pkill -f "node src/index.js|npm start" >/dev/null 2>&1 || true
+if [ "${REMOTEAGENT_FORCE_PKILL:-0}" = "1" ]; then
+  pkill -f "target/debug/feishu-acp-bridge-demo|cargo run --bin feishu-acp-bridge-demo" >/dev/null 2>&1 || true
+  pkill -f "node src/index.js|npm start" >/dev/null 2>&1 || true
+fi
 
 legacy_pid="$RUN_DIR/longconn.pid"
 if [ -f "$legacy_pid" ]; then
