@@ -19,7 +19,7 @@ for name in gateway rust; do
 done
 
 if [ "${REMOTEAGENT_FORCE_PKILL:-0}" = "1" ]; then
-  pkill -f "target/debug/feishu-acp-bridge-demo|cargo run --bin feishu-acp-bridge-demo" >/dev/null 2>&1 || true
+  pkill -f "target/debug/otterlink|cargo run --bin otterlink" >/dev/null 2>&1 || true
   pkill -f "node src/index.js|npm start" >/dev/null 2>&1 || true
 fi
 

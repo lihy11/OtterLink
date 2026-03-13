@@ -15,9 +15,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/feishu-acp-bridge-demo /usr/local/bin/feishu-acp-bridge-demo
+COPY --from=builder /app/target/release/otterlink /usr/local/bin/otterlink
 
 ENV CORE_BIND=0.0.0.0:7211
 EXPOSE 7211
 
-CMD ["feishu-acp-bridge-demo"]
+CMD ["otterlink"]

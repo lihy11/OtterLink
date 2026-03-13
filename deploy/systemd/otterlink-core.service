@@ -1,7 +1,7 @@
 [Unit]
-Description=remoteagent JS gateway
-After=network-online.target remoteagent-core.service
-Wants=network-online.target remoteagent-core.service
+Description=OtterLink Rust core
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -9,7 +9,7 @@ User=__SERVICE_USER__
 Group=__SERVICE_GROUP__
 WorkingDirectory=__ROOT_DIR__
 EnvironmentFile=__ENV_FILE__
-ExecStart=__ROOT_DIR__/scripts/run-gateway.sh
+ExecStart=__ROOT_DIR__/scripts/run-core.sh
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=2

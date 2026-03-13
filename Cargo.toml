@@ -1,5 +1,5 @@
 [package]
-name = "feishu-acp-bridge-demo"
+name = "otterlink"
 version = "0.1.0"
 edition = "2021"
 

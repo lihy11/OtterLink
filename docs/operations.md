@@ -43,15 +43,15 @@ source .run/feishu.env
 线上建议使用：
 
 ```bash
-sudo systemctl start remoteagent-core
-sudo systemctl start remoteagent-gateway
+sudo systemctl start otterlink-core
+sudo systemctl start otterlink-gateway
 ```
 
 查看状态：
 
 ```bash
-sudo systemctl status remoteagent-core
-sudo systemctl status remoteagent-gateway
+sudo systemctl status otterlink-core
+sudo systemctl status otterlink-gateway
 ```
 
 受控重载：
@@ -69,8 +69,8 @@ sudo ./scripts/reload-systemd.sh
 日志：
 
 ```bash
-sudo journalctl -u remoteagent-core -f
-sudo journalctl -u remoteagent-gateway -f
+sudo journalctl -u otterlink-core -f
+sudo journalctl -u otterlink-gateway -f
 ```
 
 ## macOS launchd 运行
@@ -84,8 +84,8 @@ sudo journalctl -u remoteagent-gateway -f
 查看状态：
 
 ```bash
-launchctl print gui/$(id -u)/com.remoteagent.core
-launchctl print gui/$(id -u)/com.remoteagent.gateway
+launchctl print gui/$(id -u)/com.otterlink.core
+launchctl print gui/$(id -u)/com.otterlink.gateway
 ```
 
 重载：
@@ -146,7 +146,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 /runtime new
 /runtime load
 /runtime load /absolute/workspace
-/runtime cwd ~/Desktop/InterestingPorjects/remoteagent/workspace
+/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
 /runtime stop
 /runtime proxy default
 /runtime proxy on http://127.0.0.1:7890
@@ -177,7 +177,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 5. gateway 提交 turn 失败
    检查 `CORE_INGEST_TOKEN` 和 `CORE_BASE_URL`。
 6. `systemctl reload` 后服务未恢复
-   检查 `journalctl -u remoteagent-core -u remoteagent-gateway -n 200`，确认新 env 或新 binary 是否能正常启动。
+   检查 `journalctl -u otterlink-core -u otterlink-gateway -n 200`，确认新 env 或新 binary 是否能正常启动。
 7. CLI 配置后启动仍失败
    先执行 `otterlink doctor`，确认 `APP_ID/APP_SECRET`、ACP 安装结果、PID 和 `healthz` 是否正常。
 

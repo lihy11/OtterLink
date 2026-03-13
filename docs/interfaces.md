@@ -38,7 +38,7 @@ Request:
 {
   "session_key": "feishu:thread:oc_xxx:th_xxx",
   "action": "load_runtimes",
-  "workspace_path": "/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/workspace"
+  "workspace_path": "/Users/haiyangli/Desktop/InterestingPorjects/otterlink/workspace"
 }
 ```
 
@@ -50,7 +50,7 @@ Response:
   "message": "已切换到 `codex`，请从下方选择会话，或执行 `/runtime new`。",
   "selector": {
     "agent_kind": "codex",
-    "workspace_path": "/Users/.../remoteagent",
+    "workspace_path": "/Users/.../otterlink",
     "has_selected_runtime": false,
     "proxy_mode": "default",
     "proxy_url": null
@@ -119,12 +119,12 @@ Request:
 源码部署后的本地控制台入口为：
 
 ```bash
-remoteagent configure
-remoteagent install-acp all --if-missing
-remoteagent doctor
-remoteagent start
-remoteagent stop
-remoteagent status
+otterlink configure
+otterlink install-acp all --if-missing
+otterlink doctor
+otterlink start
+otterlink stop
+otterlink status
 ```
 
 说明：

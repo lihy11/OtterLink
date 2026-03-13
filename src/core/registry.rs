@@ -132,7 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_parent_session_when_it_exists() {
-        let db = PathBuf::from(format!("/tmp/remoteagent-registry-{}.db", uuid::Uuid::new_v4()));
+        let db = PathBuf::from(format!("/tmp/otterlink-registry-{}.db", uuid::Uuid::new_v4()));
         let persistence = Persistence::new(db);
         persistence.init().await.unwrap();
         let registry = SessionRegistry::new(persistence).await.unwrap();

@@ -7,7 +7,7 @@ Current naming:
 - CLI command: `otterlink`
 - Naming intent: a friendly local relay agent that stays online, links Feishu with local runtimes, and carries tasks back and forth
 
-`remoteagent` is split into two runtime boundaries:
+`OtterLink` is split into two runtime boundaries:
 
 1. Rust `agent + core`
 2. Node.js `gateway`
@@ -105,15 +105,15 @@ Stop:
 cargo build --release
 cd gateway && npm ci
 
-sudo mkdir -p /etc/remoteagent /var/lib/remoteagent
-sudo cp deploy/systemd/remoteagent.env.example /etc/remoteagent/remoteagent.env
+sudo mkdir -p /etc/otterlink /var/lib/otterlink
+sudo cp deploy/systemd/otterlink.env.example /etc/otterlink/otterlink.env
 
 sudo SERVICE_USER="$USER" \
   SERVICE_GROUP="$(id -gn)" \
-  ENV_FILE=/etc/remoteagent/remoteagent.env \
+  ENV_FILE=/etc/otterlink/otterlink.env \
   ./scripts/install-systemd.sh
 
-sudo systemctl start remoteagent-core remoteagent-gateway
+sudo systemctl start otterlink-core otterlink-gateway
 ```
 
 重载：
@@ -151,7 +151,7 @@ macOS 建议使用 `launchd`，直接一键安装并启动：
 如果 env 文件不在默认的 `.run/feishu.env`：
 
 ```bash
-ENV_FILE=/absolute/path/to/remoteagent.env ./scripts/install-launchd.sh
+ENV_FILE=/absolute/path/to/otterlink.env ./scripts/install-launchd.sh
 ```
 
 重载：
@@ -186,7 +186,7 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 /runtime use codex
 /runtime pick c06c9a5e
 /runtime new my-claude
-/runtime cwd ~/Desktop/InterestingPorjects/remoteagent/workspace
+/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
 /runtime stop
 /runtime proxy default
 /runtime proxy on http://127.0.0.1:7890
@@ -204,7 +204,7 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 会话 切换 codex
 会话 选择 c06c9a5e
 会话 新建 my-claude
-会话 工作区 ~/Desktop/InterestingPorjects/remoteagent/workspace
+会话 工作区 ~/Desktop/InterestingPorjects/otterlink/workspace
 会话 停止
 ```
 
@@ -238,4 +238,4 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 - `CLAUDE_CODE_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `claude_code` 的默认代理策略
 - `CODEX_DEFAULT_PROXY_MODE`: `on | off`，控制 `proxy=default` 时 `codex` 的默认代理策略
 
-See [docs/README.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/README.md) for the full documentation set. ACP-specific protocol mapping is in [docs/acp.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/acp.md). Linux deployment details are in [docs/installation.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/installation.md), and macOS deployment details are in [docs/macos-installation.md](/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/docs/macos-installation.md).
+See [docs/README.md](/Users/haiyangli/Desktop/InterestingPorjects/otterlink/docs/README.md) for the full documentation set. ACP-specific protocol mapping is in [docs/acp.md](/Users/haiyangli/Desktop/InterestingPorjects/otterlink/docs/acp.md). Linux deployment details are in [docs/installation.md](/Users/haiyangli/Desktop/InterestingPorjects/otterlink/docs/installation.md), and macOS deployment details are in [docs/macos-installation.md](/Users/haiyangli/Desktop/InterestingPorjects/otterlink/docs/macos-installation.md).

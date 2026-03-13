@@ -13,7 +13,7 @@ cd "$ROOT_DIR"
 if [ -f .run/feishu.env ]; then
   # shellcheck disable=SC1091
   source "$ROOT_DIR/scripts/lib/common-env.sh"
-  remoteagent_source_env "$ROOT_DIR"
+  otterlink_source_env "$ROOT_DIR"
   FEISHU_DISABLE_WS=1 ./scripts/start-longconn.sh
   curl --noproxy '*' -fsS http://127.0.0.1:7211/healthz >/dev/null
   curl --noproxy '*' -fsS http://127.0.0.1:1127/healthz >/dev/null

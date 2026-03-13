@@ -1800,8 +1800,8 @@ mod tests {
     fn test_config() -> Arc<Config> {
         test_config_with_paths(
             PathBuf::from("."),
-            PathBuf::from(format!("/tmp/remoteagent-claude-{}", uuid::Uuid::new_v4())),
-            PathBuf::from(format!("/tmp/remoteagent-codex-{}", uuid::Uuid::new_v4())),
+            PathBuf::from(format!("/tmp/otterlink-claude-{}", uuid::Uuid::new_v4())),
+            PathBuf::from(format!("/tmp/otterlink-codex-{}", uuid::Uuid::new_v4())),
         )
     }
 
@@ -1815,7 +1815,7 @@ mod tests {
             core_ingest_token: None,
             gateway_event_url: "http://127.0.0.1:39000/internal/gateway/event".to_string(),
             gateway_event_token: None,
-            state_db_path: PathBuf::from(format!("/tmp/remoteagent-service-{}.db", uuid::Uuid::new_v4())),
+            state_db_path: PathBuf::from(format!("/tmp/otterlink-service-{}.db", uuid::Uuid::new_v4())),
             claude_home_dir,
             codex_home_dir,
             acp_proxy_url: Some("http://127.0.0.1:7890".to_string()),
@@ -1829,7 +1829,7 @@ mod tests {
             acp_adapter: "codex".to_string(),
             acp_agent_cmd: None,
             render_min_update_ms: 0,
-            todo_event_log_path: PathBuf::from(format!("/tmp/remoteagent-todo-{}.jsonl", uuid::Uuid::new_v4())),
+            todo_event_log_path: PathBuf::from(format!("/tmp/otterlink-todo-{}.jsonl", uuid::Uuid::new_v4())),
         })
     }
 
@@ -2358,7 +2358,7 @@ mod tests {
             sessions: Vec::new(),
             history: Vec::new(),
         });
-        let root = PathBuf::from(format!("/tmp/remoteagent-load-{}", uuid::Uuid::new_v4()));
+        let root = PathBuf::from(format!("/tmp/otterlink-load-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         let claude_home = root.join(".claude");
         std::fs::create_dir_all(&workspace).unwrap();
@@ -2430,7 +2430,7 @@ mod tests {
     #[tokio::test]
     async fn control_prefers_runtime_list_sessions_over_local_fallback() {
         let sink = Arc::new(MockSink::default());
-        let root = PathBuf::from(format!("/tmp/remoteagent-runtime-list-{}", uuid::Uuid::new_v4()));
+        let root = PathBuf::from(format!("/tmp/otterlink-runtime-list-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         let claude_home = root.join(".claude");
         std::fs::create_dir_all(&workspace).unwrap();
@@ -2501,7 +2501,7 @@ mod tests {
 
     #[test]
     fn claude_session_discovery_falls_back_to_jsonl_without_index() {
-        let root = PathBuf::from(format!("/tmp/remoteagent-discovery-{}", uuid::Uuid::new_v4()));
+        let root = PathBuf::from(format!("/tmp/otterlink-discovery-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         let claude_home = root.join(".claude");
         std::fs::create_dir_all(&workspace).unwrap();
@@ -2534,7 +2534,7 @@ mod tests {
             sessions: Vec::new(),
             history: Vec::new(),
         });
-        let root = PathBuf::from(format!("/tmp/remoteagent-codex-load-{}", uuid::Uuid::new_v4()));
+        let root = PathBuf::from(format!("/tmp/otterlink-codex-load-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         let claude_home = root.join(".claude");
         let codex_home = root.join(".codex");
@@ -2779,7 +2779,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_input_supports_tilde_paths() {
-        let fake_home = PathBuf::from(format!("/tmp/remoteagent-home-{}", uuid::Uuid::new_v4()));
+        let fake_home = PathBuf::from(format!("/tmp/otterlink-home-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(fake_home.join("demo")).unwrap();
         std::env::set_var("HOME", &fake_home);
 

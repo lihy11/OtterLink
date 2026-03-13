@@ -102,7 +102,7 @@ core 进程内还维护：
 
 ## 本地配置文件
 
-`.run/feishu.env` 现在也是正式的数据载体，默认由 `remoteagent configure` 生成和维护，保存：
+`.run/feishu.env` 现在也是正式的数据载体，默认由 `otterlink configure` 生成和维护，保存：
 
 - 飞书连接参数与 `APP_ID/APP_SECRET`
 - gateway/core token

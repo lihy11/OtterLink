@@ -123,7 +123,7 @@ cat >"$OTTERLINK_WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export REMOTEAGENT_ROOT="$ROOT_DIR"
-exec node "$ROOT_DIR/scripts/remoteagent-cli.js" "\$@"
+exec node "$ROOT_DIR/scripts/otterlink-cli.js" "\$@"
 EOF
 chmod +x "$OTTERLINK_WRAPPER_PATH"
 
@@ -141,7 +141,7 @@ if [ -t 0 ]; then
   RUN_CONFIG="${RUN_CONFIG:-Y}"
   if [[ "$RUN_CONFIG" =~ ^[Yy]$ ]]; then
     "$OTTERLINK_WRAPPER_PATH" configure
-    read -r -p "start remoteagent now? [Y/n]: " RUN_START
+    read -r -p "start otterlink now? [Y/n]: " RUN_START
     RUN_START="${RUN_START:-Y}"
     if [[ "$RUN_START" =~ ^[Yy]$ ]]; then
       "$OTTERLINK_WRAPPER_PATH" start

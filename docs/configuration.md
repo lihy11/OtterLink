@@ -15,8 +15,8 @@
 - `ALLOW_FROM_OPEN_IDS`: 逗号分隔白名单
 - `PAIR_STORE_PATH`: 配对存储路径
 - `FEISHU_DISABLE_WS=1`: 仅启动 HTTP，不连飞书 WebSocket
-- `remoteagent configure` 会交互式维护 `.run/feishu.env`
-- Linux `systemd` 部署时建议统一放进 `/etc/remoteagent/remoteagent.env`
+- `otterlink configure` 会交互式维护 `.run/feishu.env`
+- Linux `systemd` 部署时建议统一放进 `/etc/otterlink/otterlink.env`
 - macOS `launchd` 默认会读取 `.run/feishu.env`，也可通过 `ENV_FILE=... ./scripts/install-launchd.sh` 覆盖
 
 ## Rust 侧
@@ -80,11 +80,11 @@ otterlink doctor
 
 ## Linux 推荐路径
 
-- env 文件：`/etc/remoteagent/remoteagent.env`
-- state db：`/var/lib/remoteagent/state.db`
-- pairing：`/var/lib/remoteagent/pairings.json`
-- todo log：`/var/lib/remoteagent/todo-events.jsonl`
-- workspace：`/var/lib/remoteagent/workspace`
+- env 文件：`/etc/otterlink/otterlink.env`
+- state db：`/var/lib/otterlink/state.db`
+- pairing：`/var/lib/otterlink/pairings.json`
+- todo log：`/var/lib/otterlink/todo-events.jsonl`
+- workspace：`/var/lib/otterlink/workspace`
 
 ## 推荐本地组合
 

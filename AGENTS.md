@@ -16,7 +16,7 @@ This repository is split by runtime boundary.
 ## Build, Test, and Development Commands
 - `cargo check`: validate the Rust core compiles.
 - `cargo test`: run Rust unit tests.
-- `cargo run --bin feishu-acp-bridge-demo`: start the Rust core on `CORE_BIND`.
+- `cargo run --bin otterlink`: start the Rust core on `CORE_BIND`.
 - `cd gateway && npm test`: run Node gateway tests.
 - `cd gateway && npm start`: start the JS gateway on `BIND`.
 - `./scripts/start-longconn.sh`: start core + gateway together.
@@ -24,7 +24,7 @@ This repository is split by runtime boundary.
 - `./scripts/test-local-acp.sh`: run Rust tests, gateway tests, and a local health smoke.
 
 ## Long-Running Process Rule
-Commands that must keep running, such as `./scripts/start-longconn.sh`, `cargo run --bin feishu-acp-bridge-demo`, `cd gateway && npm start`, `launchctl`, or `systemctl` operations, must be executed manually by the user in a real terminal. The assistant execution environment is not persistent: background jobs may be reaped after the command finishes, so assistant-started services are not considered reliable or durable.
+Commands that must keep running, such as `./scripts/start-longconn.sh`, `cargo run --bin otterlink`, `cd gateway && npm start`, `launchctl`, or `systemctl` operations, must be executed manually by the user in a real terminal. The assistant execution environment is not persistent: background jobs may be reaped after the command finishes, so assistant-started services are not considered reliable or durable.
 
 ## Coding Style & Naming Conventions
 Rust uses 4-space indentation, `snake_case` for functions/modules, and `PascalCase` for types. JavaScript in `gateway/` uses CommonJS, 2-space indentation is acceptable, and `camelCase` for functions. Keep platform concepts in `gateway/`; keep agent/session logic in Rust.

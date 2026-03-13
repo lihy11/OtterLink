@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 
-remoteagent_source_env() {
+otterlink_source_env() {
   if [ "$#" -lt 1 ]; then
-    echo "remoteagent_source_env requires ROOT_DIR" >&2
+    echo "otterlink_source_env requires ROOT_DIR" >&2
     return 1
   fi
 
@@ -17,9 +17,9 @@ remoteagent_source_env() {
   fi
 }
 
-remoteagent_default_runtime_env() {
+otterlink_default_runtime_env() {
   if [ "$#" -lt 1 ]; then
-    echo "remoteagent_default_runtime_env requires ROOT_DIR" >&2
+    echo "otterlink_default_runtime_env requires ROOT_DIR" >&2
     return 1
   fi
 

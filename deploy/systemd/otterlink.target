@@ -1,0 +1,4 @@
+[Unit]
+Description=OtterLink stack
+Wants=otterlink-core.service otterlink-gateway.service
+After=otterlink-core.service otterlink-gateway.service

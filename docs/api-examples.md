@@ -20,7 +20,7 @@ curl -X POST http://127.0.0.1:7211/internal/core/control \
   -d '{
     \"session_key\": \"feishu:p2p:ou_xxx\",
     \"action\": \"load_runtimes\",
-    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/remoteagent/workspace\"
+    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/otterlink/workspace\"
   }'
 ```
 
@@ -33,7 +33,7 @@ curl -X POST http://127.0.0.1:7211/internal/core/control \
     \"action\": \"create_runtime\",
     \"label\": \"claude-alt\",
     \"agent_kind\": \"claude_code\",
-    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/remoteagent\"
+    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/otterlink\"
   }'
 ```
 
@@ -113,11 +113,11 @@ otterlink status
 /runtime show
 /runtime list
 /runtime load
-/runtime load /Users/haiyangli/Desktop/InterestingPorjects/remoteagent
+/runtime load /Users/haiyangli/Desktop/InterestingPorjects/otterlink
 /runtime use codex
 /runtime pick c06c9a5e
 /runtime new claude-alt
-/runtime cwd ~/Desktop/InterestingPorjects/remoteagent/workspace
+/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
 /runtime stop
 /runtime proxy default
 /runtime proxy on http://127.0.0.1:7890
@@ -136,7 +136,7 @@ otterlink status
 
 ## 控制台配置覆盖项
 
-`remoteagent configure` 当前会写入这些关键配置：
+`otterlink configure` 当前会写入这些关键配置：
 
 - 飞书 `APP_ID / APP_SECRET`
 - 是否启用 Feishu WebSocket 长连接

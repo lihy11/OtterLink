@@ -32,7 +32,7 @@ otterlink configure
 如果 env 文件不在默认位置：
 
 ```bash
-ENV_FILE=/absolute/path/to/remoteagent.env ./scripts/install-launchd.sh
+ENV_FILE=/absolute/path/to/otterlink.env ./scripts/install-launchd.sh
 ```
 
 env 文件里至少应同时定义：
@@ -55,8 +55,8 @@ export GATEWAY_EVENT_URL='http://127.0.0.1:1127/internal/gateway/event'
 查看状态：
 
 ```bash
-launchctl print gui/$(id -u)/com.remoteagent.core
-launchctl print gui/$(id -u)/com.remoteagent.gateway
+launchctl print gui/$(id -u)/com.otterlink.core
+launchctl print gui/$(id -u)/com.otterlink.gateway
 ```
 
 重载：
@@ -68,8 +68,8 @@ launchctl print gui/$(id -u)/com.remoteagent.gateway
 停止并卸载：
 
 ```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.remoteagent.core.plist
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.remoteagent.gateway.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.otterlink.core.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.otterlink.gateway.plist
 ```
 
 ## 日志

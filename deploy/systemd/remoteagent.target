@@ -1,4 +1,0 @@
-[Unit]
-Description=remoteagent stack
-Wants=remoteagent-core.service remoteagent-gateway.service
-After=remoteagent-core.service remoteagent-gateway.service

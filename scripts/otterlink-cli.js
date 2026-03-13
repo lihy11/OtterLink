@@ -120,7 +120,7 @@ async function configureCommand({ rootDir, envFile, nonInteractive }) {
   const defaults = buildConfigDefaults(rootDir, current);
   const rl = readline.createInterface({ input: stdin, output: stdout });
   try {
-    console.log(`Configuring remoteagent with env file: ${envFile}\n`);
+    console.log(`Configuring OtterLink with env file: ${envFile}\n`);
     const next = { ...defaults };
 
     next.APP_ID = await promptText(rl, 'Feishu APP_ID', defaults.APP_ID);

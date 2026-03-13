@@ -32,7 +32,7 @@
 10. `acp.md`
    ACP 功能与官方文档的逐项映射。
 
-最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `remoteagent` 控制台工具与一键安装脚本。
+最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `otterlink` 控制台工具与一键安装脚本。
 
 ## 背景资料
 
@@ -59,11 +59,11 @@
 
 ## 部署资源
 
-- `../deploy/systemd/remoteagent-core.service`
-- `../deploy/systemd/remoteagent-gateway.service`
-- `../deploy/systemd/remoteagent.target`
-- `../deploy/systemd/remoteagent.env.example`
-- `../deploy/launchd/com.remoteagent.core.plist`
-- `../deploy/launchd/com.remoteagent.gateway.plist`
+- `../deploy/systemd/otterlink-core.service`
+- `../deploy/systemd/otterlink-gateway.service`
+- `../deploy/systemd/otterlink.target`
+- `../deploy/systemd/otterlink.env.example`
+- `../deploy/launchd/com.otterlink.core.plist`
+- `../deploy/launchd/com.otterlink.gateway.plist`
 - `../scripts/install-one-click.sh`
-- `../scripts/remoteagent-cli.js`
+- `../scripts/otterlink-cli.js`

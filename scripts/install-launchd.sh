@@ -23,11 +23,11 @@ render_plist() {
     "$src" > "$dst"
 }
 
-CORE_PLIST="$AGENT_DIR/com.remoteagent.core.plist"
-GATEWAY_PLIST="$AGENT_DIR/com.remoteagent.gateway.plist"
+CORE_PLIST="$AGENT_DIR/com.otterlink.core.plist"
+GATEWAY_PLIST="$AGENT_DIR/com.otterlink.gateway.plist"
 
-render_plist "$TEMPLATE_DIR/com.remoteagent.core.plist" "$CORE_PLIST"
-render_plist "$TEMPLATE_DIR/com.remoteagent.gateway.plist" "$GATEWAY_PLIST"
+render_plist "$TEMPLATE_DIR/com.otterlink.core.plist" "$CORE_PLIST"
+render_plist "$TEMPLATE_DIR/com.otterlink.gateway.plist" "$GATEWAY_PLIST"
 
 launchctl bootout "gui/$UID_VALUE" "$CORE_PLIST" >/dev/null 2>&1 || true
 launchctl bootout "gui/$UID_VALUE" "$GATEWAY_PLIST" >/dev/null 2>&1 || true
@@ -35,8 +35,8 @@ launchctl bootout "gui/$UID_VALUE" "$GATEWAY_PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID_VALUE" "$CORE_PLIST"
 launchctl bootstrap "gui/$UID_VALUE" "$GATEWAY_PLIST"
 
-launchctl kickstart -k "gui/$UID_VALUE/com.remoteagent.core"
-launchctl kickstart -k "gui/$UID_VALUE/com.remoteagent.gateway"
+launchctl kickstart -k "gui/$UID_VALUE/com.otterlink.core"
+launchctl kickstart -k "gui/$UID_VALUE/com.otterlink.gateway"
 
 cat <<EOF
 installed and started launchd agents:
@@ -47,8 +47,8 @@ env file:
   $ENV_FILE
 
 status:
-  launchctl print gui/$UID_VALUE/com.remoteagent.core
-  launchctl print gui/$UID_VALUE/com.remoteagent.gateway
+  launchctl print gui/$UID_VALUE/com.otterlink.core
+  launchctl print gui/$UID_VALUE/com.otterlink.gateway
 
 logs:
   tail -f "$ROOT_DIR/.run/core.launchd.log"

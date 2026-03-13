@@ -8,5 +8,5 @@ fi
 
 UID_VALUE="$(id -u)"
 
-launchctl kickstart -k "gui/$UID_VALUE/com.remoteagent.core"
-launchctl kickstart -k "gui/$UID_VALUE/com.remoteagent.gateway"
+launchctl kickstart -k "gui/$UID_VALUE/com.otterlink.core"
+launchctl kickstart -k "gui/$UID_VALUE/com.otterlink.gateway"

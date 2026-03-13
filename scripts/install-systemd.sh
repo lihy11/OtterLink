@@ -11,7 +11,7 @@ SYSTEMD_DIR="$ROOT_DIR/deploy/systemd"
 UNIT_TARGET_DIR="${UNIT_TARGET_DIR:-/etc/systemd/system}"
 SERVICE_USER="${SERVICE_USER:-$(id -un)}"
 SERVICE_GROUP="${SERVICE_GROUP:-$(id -gn)}"
-ENV_FILE="${ENV_FILE:-/etc/remoteagent/remoteagent.env}"
+ENV_FILE="${ENV_FILE:-/etc/otterlink/otterlink.env}"
 
 if [ ! -d "$SYSTEMD_DIR" ]; then
   echo "missing $SYSTEMD_DIR"
@@ -36,23 +36,23 @@ render_unit() {
     "$src" > "$dst"
 }
 
-render_unit "$SYSTEMD_DIR/remoteagent-core.service" "$UNIT_TARGET_DIR/remoteagent-core.service"
-render_unit "$SYSTEMD_DIR/remoteagent-gateway.service" "$UNIT_TARGET_DIR/remoteagent-gateway.service"
-cp "$SYSTEMD_DIR/remoteagent.target" "$UNIT_TARGET_DIR/remoteagent.target"
+render_unit "$SYSTEMD_DIR/otterlink-core.service" "$UNIT_TARGET_DIR/otterlink-core.service"
+render_unit "$SYSTEMD_DIR/otterlink-gateway.service" "$UNIT_TARGET_DIR/otterlink-gateway.service"
+cp "$SYSTEMD_DIR/otterlink.target" "$UNIT_TARGET_DIR/otterlink.target"
 
 systemctl daemon-reload
-systemctl enable remoteagent-core.service remoteagent-gateway.service remoteagent.target >/dev/null
+systemctl enable otterlink-core.service otterlink-gateway.service otterlink.target >/dev/null
 
 cat <<EOF
 installed systemd units:
-  $UNIT_TARGET_DIR/remoteagent-core.service
-  $UNIT_TARGET_DIR/remoteagent-gateway.service
-  $UNIT_TARGET_DIR/remoteagent.target
+  $UNIT_TARGET_DIR/otterlink-core.service
+  $UNIT_TARGET_DIR/otterlink-gateway.service
+  $UNIT_TARGET_DIR/otterlink.target
 
 next steps:
   1. create env file: $ENV_FILE
   2. build release binary: (cd $ROOT_DIR && cargo build --release)
   3. install gateway deps: (cd $ROOT_DIR/gateway && npm ci)
-  4. start services: systemctl start remoteagent-core remoteagent-gateway
-  5. or start target: systemctl start remoteagent.target
+  4. start services: systemctl start otterlink-core otterlink-gateway
+  5. or start target: systemctl start otterlink.target
 EOF

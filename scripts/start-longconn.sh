@@ -7,8 +7,8 @@ mkdir -p "$RUN_DIR"
 
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/lib/common-env.sh"
-remoteagent_source_env "$ROOT_DIR"
-remoteagent_default_runtime_env "$ROOT_DIR"
+otterlink_source_env "$ROOT_DIR"
+otterlink_default_runtime_env "$ROOT_DIR"
 
 : "${APP_ID:?missing APP_ID}"
 : "${APP_SECRET:?missing APP_SECRET}"

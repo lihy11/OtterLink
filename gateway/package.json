@@ -1,5 +1,5 @@
 {
-  "name": "remoteagent-gateway",
+  "name": "otterlink-gateway",
   "private": true,
   "version": "0.1.0",
   "description": "JS gateway for IM platform integration",
