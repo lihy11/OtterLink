@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_BIN_DIR="${INSTALL_BIN_DIR:-$HOME/.local/bin}"
-WRAPPER_PATH="$INSTALL_BIN_DIR/remoteagent"
+OTTERLINK_WRAPPER_PATH="$INSTALL_BIN_DIR/otterlink"
 RUST_VERSION="${RUST_VERSION:-1.94.0}"
 NODE_VERSION="${NODE_VERSION:-22.22.1}"
 NODE_DISTRO="${NODE_DISTRO:-node-v${NODE_VERSION}-linux-x64}"
@@ -119,38 +119,38 @@ echo "building Rust release binary"
 echo "installing gateway dependencies"
 (cd "$ROOT_DIR/gateway" && npm ci)
 
-cat >"$WRAPPER_PATH" <<EOF
+cat >"$OTTERLINK_WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export REMOTEAGENT_ROOT="$ROOT_DIR"
 exec node "$ROOT_DIR/scripts/remoteagent-cli.js" "\$@"
 EOF
-chmod +x "$WRAPPER_PATH"
+chmod +x "$OTTERLINK_WRAPPER_PATH"
 
-echo "installed CLI: $WRAPPER_PATH"
+echo "installed CLI: $OTTERLINK_WRAPPER_PATH"
 if [[ ":$PATH:" != *":$INSTALL_BIN_DIR:"* ]]; then
-  echo "add $INSTALL_BIN_DIR to PATH to use \`remoteagent\` directly"
+  echo "add $INSTALL_BIN_DIR to PATH to use \`otterlink\` directly"
 fi
 
 echo "preinstalling ACP runtimes when missing"
-"$WRAPPER_PATH" install-acp all --if-missing
+"$OTTERLINK_WRAPPER_PATH" install-acp all --if-missing
 
 echo
 if [ -t 0 ]; then
   read -r -p "run interactive configuration now? [Y/n]: " RUN_CONFIG
   RUN_CONFIG="${RUN_CONFIG:-Y}"
   if [[ "$RUN_CONFIG" =~ ^[Yy]$ ]]; then
-    "$WRAPPER_PATH" configure
+    "$OTTERLINK_WRAPPER_PATH" configure
     read -r -p "start remoteagent now? [Y/n]: " RUN_START
     RUN_START="${RUN_START:-Y}"
     if [[ "$RUN_START" =~ ^[Yy]$ ]]; then
-      "$WRAPPER_PATH" start
-      "$WRAPPER_PATH" status
+      "$OTTERLINK_WRAPPER_PATH" start
+      "$OTTERLINK_WRAPPER_PATH" status
     fi
   fi
 fi
 
 echo "ready"
-echo "  remoteagent configure"
-echo "  remoteagent start"
-echo "  remoteagent status"
+echo "  otterlink configure"
+echo "  otterlink start"
+echo "  otterlink status"

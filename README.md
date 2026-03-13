@@ -1,9 +1,10 @@
-# remoteagent
+# OtterLink
 
-Current product naming direction:
+Current naming:
 
 - Chinese name: `水獭`
 - English name: `OtterLink`
+- CLI command: `otterlink`
 - Naming intent: a friendly local relay agent that stays online, links Feishu with local runtimes, and carries tasks back and forth
 
 `remoteagent` is split into two runtime boundaries:
@@ -76,12 +77,12 @@ Feishu rendering policy:
 
 ```bash
 ./scripts/install-one-click.sh
-remoteagent configure
-remoteagent start
+otterlink configure
+otterlink start
 ```
 
 控制台工具会统一管理 `.run/feishu.env`、检测 ACP runtime、并提供启动/停止/状态检查。若当前机器缺少 Rust 或 Node，安装脚本会自动补装当前项目默认版本：Rust `1.94.0`、Node `22.22.1`。
-`remoteagent start` / `scripts/start-longconn.sh` 现在只负责启动，不再隐式安装 gateway 依赖。
+`otterlink start` / `scripts/start-longconn.sh` 现在只负责启动，不再隐式安装 gateway 依赖。
 
 传统本地启动仍然可用：
 
@@ -125,16 +126,17 @@ sudo ./scripts/reload-systemd.sh
 
 ## Console Tool
 
-安装脚本会把 `remoteagent` 包装器写到 `~/.local/bin/remoteagent`。常用命令：
+安装脚本会把 `otterlink` 命令写到 `~/.local/bin/otterlink`。常用命令：
 
 ```bash
-remoteagent configure
-remoteagent install-acp all --if-missing
-remoteagent doctor
-remoteagent start
-remoteagent stop
-remoteagent status
+otterlink configure
+otterlink install-acp all --if-missing
+otterlink doctor
+otterlink start
+otterlink stop
+otterlink status
 ```
+
 
 `configure` 会交互式写入飞书凭据、长连接开关、默认 agent、默认 workspace、默认代理地址，以及 `claude_code` / `codex` 各自的默认代理模式。
 

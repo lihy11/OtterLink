@@ -66,8 +66,8 @@
 
 ```bash
 ./scripts/install-one-click.sh
-remoteagent configure
-remoteagent doctor
+otterlink configure
+otterlink doctor
 ```
 
 控制台工具会：

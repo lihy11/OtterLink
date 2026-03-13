@@ -20,7 +20,7 @@
 
 ```bash
 ./scripts/install-one-click.sh
-remoteagent configure
+otterlink configure
 ```
 
 然后执行：

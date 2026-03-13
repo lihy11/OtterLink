@@ -44,12 +44,12 @@ apt-get install -y nodejs build-essential pkg-config libssl-dev
 3. 安装 `remoteagent` 控制台命令到 `~/.local/bin/remoteagent`
 4. 扫描并预装缺失的 `claude_code` / `codex` ACP runtime
 5. 如果当前机器缺少 Rust 或 Node，则自动安装 Rust `1.94.0` 与 Node `22.22.1`
-6. 在交互式终端中可继续进入 `remoteagent configure` 和 `remoteagent start`
+6. 在交互式终端中可继续进入 `otterlink configure` 和 `otterlink start`
 
 说明：
 
 - 一键安装负责依赖和构建
-- `remoteagent start` / `scripts/start-longconn.sh` 只负责启动，不再在运行时补装依赖
+- `otterlink start` / `scripts/start-longconn.sh` 只负责启动，不再在运行时补装依赖
 
 ## 构建
 

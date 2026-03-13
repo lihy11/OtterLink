@@ -95,19 +95,19 @@ function getOptionValue(args, name) {
 }
 
 function printHelp(rootDir, envFile) {
-  console.log(`remoteagent
+  console.log(`OtterLink CLI
 
 Project root: ${rootDir}
 Env file: ${envFile}
 
 Usage:
-  remoteagent configure [--env-file PATH]
-  remoteagent install-acp [claude_code|codex|all] [--if-missing]
-  remoteagent doctor [--env-file PATH]
-  remoteagent start [--env-file PATH]
-  remoteagent stop [--env-file PATH]
-  remoteagent restart [--env-file PATH]
-  remoteagent status [--env-file PATH]
+  otterlink configure [--env-file PATH]
+  otterlink install-acp [claude_code|codex|all] [--if-missing]
+  otterlink doctor [--env-file PATH]
+  otterlink start [--env-file PATH]
+  otterlink stop [--env-file PATH]
+  otterlink restart [--env-file PATH]
+  otterlink status [--env-file PATH]
 `);
 }
 

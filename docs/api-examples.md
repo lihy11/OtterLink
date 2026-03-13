@@ -95,11 +95,11 @@ curl -X POST http://127.0.0.1:1127/internal/notify \
 
 ```bash
 ./scripts/install-one-click.sh
-remoteagent configure
-remoteagent install-acp all --if-missing
-remoteagent doctor
-remoteagent start
-remoteagent status
+otterlink configure
+otterlink install-acp all --if-missing
+otterlink doctor
+otterlink start
+otterlink status
 ./scripts/start-longconn.sh
 ./scripts/stop-longconn.sh
 ./scripts/send-notify.sh 'hello'
