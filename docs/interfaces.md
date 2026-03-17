@@ -131,7 +131,7 @@ otterlink status
 
 - `configure` 负责写 `.run/feishu.env`
 - `install-acp` 负责扫描/安装 `claude_code` 与 `codex` ACP runtime
-- `start/stop` 仍复用仓库脚本，但由统一 CLI 传入 `REMOTEAGENT_ENV_FILE`
+- `start/stop` 仍复用仓库脚本，但由统一 CLI 传入 `OTTERLINK_ENV_FILE`
 
 ## 标准消息模型
 

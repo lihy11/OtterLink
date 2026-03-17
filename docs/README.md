@@ -34,15 +34,15 @@
 
 最新运行控制补充包括：`/ot stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `otterlink` 控制台工具与一键安装脚本。
 
-## 背景资料
+## 归档资料
 
-以下文件保留作背景参考，不应覆盖主文档：
+历史方案、计划和实现笔记已移动到 `archive/`，仅作为背景参考，不应覆盖主文档：
 
-- `three-layer-architecture.md`
-- `demo-implementation-notes.md`
-- `project-plan-v2.md`
-- `feishu-acp-session-architecture-plan.md`
-- `task-list.md`
+- `archive/three-layer-architecture.md`
+- `archive/demo-implementation-notes.md`
+- `archive/project-plan-v2.md`
+- `archive/feishu-acp-session-architecture-plan.md`
+- `archive/task-list.md`
 
 ## 阅读顺序
 

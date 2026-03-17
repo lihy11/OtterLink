@@ -246,7 +246,3 @@ For full configuration details, see [docs/configuration.md](docs/configuration.m
 - Do not commit `.run/`, bot credentials, or real Feishu identifiers.
 - Keep `CORE_BIND` private; the Rust core trusts the gateway.
 - Always set `CORE_INGEST_TOKEN` and `GATEWAY_EVENT_TOKEN` in non-local deployments.
-
-## License
-
-Add your project license here.

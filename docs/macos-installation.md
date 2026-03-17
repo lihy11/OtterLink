@@ -84,5 +84,6 @@ tail -f .run/gateway.launchd.log
 1. `launchd` 没有 `systemd EnvironmentFile` 那种机制，所以这里用了包装脚本：
    - `scripts/launchd-core.sh`
    - `scripts/launchd-gateway.sh`
-2. 它们会先加载 env，再启动真正的进程。
-3. macOS 上重载语义是 `kickstart -k`，也就是受控重启，不是进程内热更新。
+2. 它们只负责补齐 macOS PATH 并转交给 `scripts/run-*.sh`。
+3. env 的加载在 `scripts/run-core.sh` 和 `scripts/run-gateway.sh` 中统一完成。
+4. macOS 上重载语义是 `kickstart -k`，也就是受控重启，不是进程内热更新。

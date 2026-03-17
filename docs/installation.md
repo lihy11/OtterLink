@@ -17,10 +17,20 @@
 
 ## 依赖
 
+推荐直接使用一键安装脚本，它会在缺失时自动安装项目当前固定版本：
+
+- Rust `1.94.0`
+- Node.js `22.22.1`
+
+如果你选择手工准备环境，版本应与一键安装脚本保持一致，并至少提供：
+
 ```bash
-rustup toolchain install stable
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs build-essential pkg-config libssl-dev
+cargo
+node
+npm
+git
+curl
+tar
 ```
 
 需要提前准备：

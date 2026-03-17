@@ -7,7 +7,7 @@ otterlink_source_env() {
   fi
 
   ROOT_DIR="$1"
-  ENV_FILE="${REMOTEAGENT_ENV_FILE:-$ROOT_DIR/.run/feishu.env}"
+  ENV_FILE="${OTTERLINK_ENV_FILE:-$ROOT_DIR/.run/feishu.env}"
 
   if [ -f "$ENV_FILE" ]; then
     set -a

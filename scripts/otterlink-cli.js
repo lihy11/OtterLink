@@ -76,14 +76,14 @@ async function main() {
 }
 
 function resolveRootDir() {
-  return process.env.REMOTEAGENT_ROOT || path.resolve(__dirname, '..');
+  return process.env.OTTERLINK_ROOT || path.resolve(__dirname, '..');
 }
 
 function resolveEnvFile(rootDir, explicitPath) {
   if (explicitPath) {
     return path.resolve(explicitPath.replace(/^~(?=\/|$)/, os.homedir()));
   }
-  return process.env.REMOTEAGENT_ENV_FILE || path.join(rootDir, '.run', 'feishu.env');
+  return process.env.OTTERLINK_ENV_FILE || path.join(rootDir, '.run', 'feishu.env');
 }
 
 function getOptionValue(args, name) {
@@ -578,7 +578,7 @@ function runRepoScript(rootDir, relativeScript, envFile) {
   const scriptPath = path.join(rootDir, relativeScript);
   runChecked(scriptPath, [], {
     cwd: rootDir,
-    env: { ...process.env, REMOTEAGENT_ENV_FILE: envFile, REMOTEAGENT_ROOT: rootDir },
+    env: { ...process.env, OTTERLINK_ENV_FILE: envFile, OTTERLINK_ROOT: rootDir },
   });
 }
 

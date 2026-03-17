@@ -122,7 +122,7 @@ echo "installing gateway dependencies"
 cat >"$OTTERLINK_WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export REMOTEAGENT_ROOT="$ROOT_DIR"
+export OTTERLINK_ROOT="$ROOT_DIR"
 exec node "$ROOT_DIR/scripts/otterlink-cli.js" "\$@"
 EOF
 chmod +x "$OTTERLINK_WRAPPER_PATH"

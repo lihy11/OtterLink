@@ -14,7 +14,7 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-      <key>REMOTEAGENT_ENV_FILE</key>
+      <key>OTTERLINK_ENV_FILE</key>
       <string>__ENV_FILE__</string>
     </dict>
 
