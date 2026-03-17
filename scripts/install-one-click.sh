@@ -8,8 +8,6 @@ RUST_VERSION="${RUST_VERSION:-1.94.0}"
 NODE_VERSION="${NODE_VERSION:-22.22.1}"
 NODE_DISTRO="${NODE_DISTRO:-node-v${NODE_VERSION}-linux-x64}"
 NODE_PREFIX="${NODE_PREFIX:-$HOME/.local/$NODE_DISTRO}"
-PROFILE_FILES=("$HOME/.profile" "$HOME/.bash_profile")
-
 usage() {
   cat <<EOF
 Usage: ./scripts/install-one-click.sh
@@ -68,6 +66,7 @@ install_rust_if_missing() {
   "$HOME/.cargo/bin/rustup" default "$RUST_VERSION"
   append_path_line "$HOME/.profile" 'export PATH="$HOME/.cargo/bin:$PATH"'
   append_path_line "$HOME/.bash_profile" 'export PATH="$HOME/.cargo/bin:$PATH"'
+  append_path_line "$HOME/.bashrc" 'export PATH="$HOME/.cargo/bin:$PATH"'
   echo "installed cargo: $("$HOME/.cargo/bin/cargo" --version)"
 }
 
@@ -98,6 +97,7 @@ install_node_if_missing() {
 
   append_path_line "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
   append_path_line "$HOME/.bash_profile" 'export PATH="$HOME/.local/bin:$PATH"'
+  append_path_line "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
   refresh_path
 
   echo "installed node: $("$INSTALL_BIN_DIR/node" --version)"

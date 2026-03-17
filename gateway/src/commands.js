@@ -8,7 +8,7 @@ function parseControlCommand(text) {
   const normalizedHead = head.toLowerCase();
   const normalizedAction = (action || '').toLowerCase();
 
-  if (['/runtime', 'runtime', '/rt', '/rumtime', 'rumtime', '会话'].includes(normalizedHead)) {
+  if (['/ot', 'ot', '会话'].includes(normalizedHead)) {
     if (!normalizedAction || ['help', '帮助'].includes(normalizedAction)) {
       return { local_action: 'runtime_help' };
     }
@@ -32,7 +32,7 @@ function parseControlCommand(text) {
     }
     if (['use', 'switch', '切换'].includes(normalizedAction)) {
       if (rest.length === 0) {
-        return invalidRuntimeCommand('缺少 agent 名称。用法：`/runtime use <claude|codex>`');
+        return invalidRuntimeCommand('缺少 agent 名称。用法：`/ot use <claude|codex>`');
       }
       return {
         action: 'use_agent',
@@ -41,7 +41,7 @@ function parseControlCommand(text) {
     }
     if (['pick', '选择'].includes(normalizedAction)) {
       if (rest.length === 0) {
-        return invalidRuntimeCommand('缺少会话 ID。用法：`/runtime pick <short_id>`');
+        return invalidRuntimeCommand('缺少会话 ID。用法：`/ot pick <short_id>`');
       }
       return {
         action: 'switch_runtime',
@@ -50,7 +50,7 @@ function parseControlCommand(text) {
     }
     if (['cwd', '工作区', '目录'].includes(normalizedAction)) {
       if (rest.length === 0) {
-        return invalidRuntimeCommand('缺少路径。用法：`/runtime cwd <path>`');
+        return invalidRuntimeCommand('缺少路径。用法：`/ot cwd <path>`');
       }
       return {
         action: 'set_workspace',
@@ -64,7 +64,7 @@ function parseControlCommand(text) {
     }
     if (['proxy', '代理'].includes(normalizedAction)) {
       if (rest.length === 0) {
-        return invalidRuntimeCommand('缺少代理模式。用法：`/runtime proxy <default|on|off> [proxy_url]`');
+        return invalidRuntimeCommand('缺少代理模式。用法：`/ot proxy <default|on|off> [proxy_url]`');
       }
       const [mode, ...proxyRest] = rest;
       if (looksLikeProxyUrl(mode)) {
@@ -81,7 +81,7 @@ function parseControlCommand(text) {
       };
     }
 
-    return invalidRuntimeCommand(`未知命令：\`${action}\`。请使用 \`/runtime help\` 查看支持的子命令。`);
+    return invalidRuntimeCommand(`未知命令：\`${action}\`。请使用 \`/ot help\` 查看支持的子命令。`);
   }
 
   return null;
@@ -198,16 +198,16 @@ function renderRuntimeHelp() {
         {
           kind: 'markdown',
           text: [
-            '`/runtime help`',
-            '`/runtime show`',
-            '`/runtime list`',
-            '`/runtime load [workspace]`',
-            '`/runtime use <claude|codex>`',
-            '`/runtime pick <short_id>`',
-            '`/runtime new <label>`',
-            '`/runtime cwd <path>`',
-            '`/runtime stop`',
-            '`/runtime proxy <default|on|off> [proxy_url]`',
+            '`/ot help`',
+            '`/ot show`',
+            '`/ot list`',
+            '`/ot load [workspace]`',
+            '`/ot use <claude|codex>`',
+            '`/ot pick <short_id>`',
+            '`/ot new <label>`',
+            '`/ot cwd <path>`',
+            '`/ot stop`',
+            '`/ot proxy <default|on|off> [proxy_url]`',
           ].join('\n'),
         },
         { kind: 'divider' },

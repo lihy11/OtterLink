@@ -246,12 +246,26 @@ function buildConfigDefaults(rootDir, current) {
     FEISHU_DISABLE_WS: current.FEISHU_DISABLE_WS || '0',
     PAIR_AUTH_TOKEN: current.PAIR_AUTH_TOKEN || '',
     ALLOW_FROM_OPEN_IDS: current.ALLOW_FROM_OPEN_IDS || '',
-    PAIR_STORE_PATH: current.PAIR_STORE_PATH || path.join(rootDir, '.run', 'pairings.json'),
-    STATE_DB_PATH: current.STATE_DB_PATH || path.join(rootDir, '.run', 'state.db'),
-    TODO_EVENT_LOG_PATH:
-      current.TODO_EVENT_LOG_PATH || path.join(rootDir, '.run', 'todo-events.jsonl'),
-    CLAUDE_HOME_DIR: current.CLAUDE_HOME_DIR || path.join(os.homedir(), '.claude'),
-    CODEX_HOME_DIR: current.CODEX_HOME_DIR || path.join(os.homedir(), '.codex'),
+    PAIR_STORE_PATH: preferredConfigPath(
+      current.PAIR_STORE_PATH,
+      path.join(rootDir, '.run', 'pairings.json'),
+    ),
+    STATE_DB_PATH: preferredConfigPath(
+      current.STATE_DB_PATH,
+      path.join(rootDir, '.run', 'state.db'),
+    ),
+    TODO_EVENT_LOG_PATH: preferredConfigPath(
+      current.TODO_EVENT_LOG_PATH,
+      path.join(rootDir, '.run', 'todo-events.jsonl'),
+    ),
+    CLAUDE_HOME_DIR: preferredConfigPath(
+      current.CLAUDE_HOME_DIR,
+      path.join(os.homedir(), '.claude'),
+    ),
+    CODEX_HOME_DIR: preferredConfigPath(
+      current.CODEX_HOME_DIR,
+      path.join(os.homedir(), '.codex'),
+    ),
     RUNTIME_MODE: current.RUNTIME_MODE || 'acp_fallback',
     ACP_ADAPTER: current.ACP_ADAPTER || 'claude_code',
     ACP_AGENT_CMD: current.ACP_AGENT_CMD || '',
@@ -260,10 +274,50 @@ function buildConfigDefaults(rootDir, current) {
       current.CLAUDE_CODE_DEFAULT_PROXY_MODE || 'off',
     CODEX_DEFAULT_PROXY_MODE: current.CODEX_DEFAULT_PROXY_MODE || 'on',
     CODEX_BIN: current.CODEX_BIN || 'codex',
-    CODEX_WORKDIR: current.CODEX_WORKDIR || path.join(rootDir, 'workspace'),
+    CODEX_WORKDIR: preferredConfigPath(
+      current.CODEX_WORKDIR,
+      path.join(rootDir, 'workspace'),
+    ),
     CODEX_SKIP_GIT_REPO_CHECK: current.CODEX_SKIP_GIT_REPO_CHECK || 'true',
     RENDER_MIN_UPDATE_MS: current.RENDER_MIN_UPDATE_MS || '700',
   };
+}
+
+function preferredConfigPath(currentValue, fallbackPath) {
+  const fallback = expandHomePath(fallbackPath);
+  const candidate = expandHomePath(currentValue);
+  if (!candidate) {
+    return fallback;
+  }
+  return canWriteTargetPath(candidate) ? candidate : fallback;
+}
+
+function expandHomePath(value) {
+  if (!value) {
+    return '';
+  }
+  return path.resolve(String(value).replace(/^~(?=\/|$)/, os.homedir()));
+}
+
+function canWriteTargetPath(targetPath) {
+  const candidate = expandHomePath(targetPath);
+  let probe = candidate;
+  const { W_OK } = fs.constants;
+
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) {
+      return false;
+    }
+    probe = parent;
+  }
+
+  try {
+    fs.accessSync(probe, W_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function doctorCommand({ rootDir, envFile }) {

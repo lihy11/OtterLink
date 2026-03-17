@@ -12,7 +12,7 @@
 - 进程退出后自动保活
 - 可用 `launchctl kickstart -k` 做受控重启
 
-运行后可通过飞书 `/runtime stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖终端前台信号。
+运行后可通过飞书 `/ot stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖终端前台信号。
 
 ## 一键安装并启动
 

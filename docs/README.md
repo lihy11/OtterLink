@@ -32,7 +32,7 @@
 10. `acp.md`
    ACP 功能与官方文档的逐项映射。
 
-最新运行控制补充包括：`/runtime stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `otterlink` 控制台工具与一键安装脚本。
+最新运行控制补充包括：`/ot stop`、ACP 协议取消、ACP `session/list`、代理注入策略，以及本地 `otterlink` 控制台工具与一键安装脚本。
 
 ## 背景资料
 

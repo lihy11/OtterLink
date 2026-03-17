@@ -49,15 +49,15 @@
 1. `CODEX_WORKDIR` 现在只是默认 workspace。
 2. 单个聊天可通过 control 命令切换到其他 workspace。
 3. 若当前 runtime 已经建立 `runtime_session_ref`，再切 workspace 会创建一个新的 runtime instance 并切过去。
-4. `/runtime load [workspace]` 对 `claude_code` 会从 `CLAUDE_HOME_DIR/projects/<workspace-key>/` 导入。
-5. `/runtime load [workspace]` 优先走 ACP `session/list`；只有 agent 不支持时，`claude_code` 才回退扫描 `sessions-index.json` / `*.jsonl`。
+4. `/ot load [workspace]` 对 `claude_code` 会从 `CLAUDE_HOME_DIR/projects/<workspace-key>/` 导入。
+5. `/ot load [workspace]` 优先走 ACP `session/list`；只有 agent 不支持时，`claude_code` 才回退扫描 `sessions-index.json` / `*.jsonl`。
 6. `codex` 只有在 ACP `session/list` 不可用时，才回退读取 `CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表按 `cwd` 导入。
 7. macOS 上 `/tmp` 与 `/private/tmp` 的路径别名会同时尝试。
-8. `/runtime use <claude|codex>` 只切换 agent，不会隐式新建 session。
-9. 普通消息前需要显式 `/runtime pick <short_id>` 或 `/runtime new`。
-10. `/runtime cwd <path>` 支持绝对路径、`~/...`，以及相对当前服务工作目录的相对路径。
-11. `/runtime stop` 会对当前活动 turn 发停止请求；ACP runtime 走协议取消，`exec_json` 走本地进程终止。
-12. `/runtime proxy <default|on|off> [proxy_url]` 会更新当前选择器的代理模式。
+8. `/ot use <claude|codex>` 只切换 agent，不会隐式新建 session。
+9. 普通消息前需要显式 `/ot pick <short_id>` 或 `/ot new`。
+10. `/ot cwd <path>` 支持绝对路径、`~/...`，以及相对当前服务工作目录的相对路径。
+11. `/ot stop` 会对当前活动 turn 发停止请求；ACP runtime 走协议取消，`exec_json` 走本地进程终止。
+12. `/ot proxy <default|on|off> [proxy_url]` 会更新当前选择器的代理模式。
 13. `default` 下会读取 `CLAUDE_CODE_DEFAULT_PROXY_MODE` / `CODEX_DEFAULT_PROXY_MODE`。
 
 ## 控制台工具

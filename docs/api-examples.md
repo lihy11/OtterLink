@@ -109,30 +109,30 @@ otterlink status
 ## 飞书中的控制命令
 
 ```text
-/runtime help
-/runtime show
-/runtime list
-/runtime load
-/runtime load /Users/haiyangli/Desktop/InterestingPorjects/otterlink
-/runtime use codex
-/runtime pick c06c9a5e
-/runtime new claude-alt
-/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
-/runtime stop
-/runtime proxy default
-/runtime proxy on http://127.0.0.1:7890
-/runtime proxy off
+/ot help
+/ot show
+/ot list
+/ot load
+/ot load /Users/haiyangli/Desktop/InterestingPorjects/otterlink
+/ot use codex
+/ot pick c06c9a5e
+/ot new claude-alt
+/ot cwd ~/Desktop/InterestingPorjects/otterlink/workspace
+/ot stop
+/ot proxy default
+/ot proxy on http://127.0.0.1:7890
+/ot proxy off
 会话 帮助
 ```
 
 说明：
 
-1. `/runtime load` 会优先调用 ACP `session/list` 按当前 `agent + cwd` 列出会话。
+1. `/ot load` 会优先调用 ACP `session/list` 按当前 `agent + cwd` 列出会话。
 2. 只有 agent 不支持 `session/list` 时，`claude_code` 才回退到 `CLAUDE_HOME_DIR/projects/...`，`codex` 才回退到 `CODEX_HOME_DIR/state_5.sqlite`。
 3. `list/show/load` 的飞书返回会渲染为 Markdown 表格，表头摘要只显示当前 `Agent` 和 `CWD`。
-4. `/runtime pick` 如果命中已有 session，除了控制结果表格外，还会额外回一张 `历史概览` 卡片，展示裁剪后的最近 5 轮 `user / assistant` 对话。
-5. `/runtime stop` 会停止当前正在运行的 turn；ACP 会发 `session/cancel`，`exec_json` 会终止本地进程。
-6. `/runtime proxy` 会控制后续 ACP/exec 启动时是否注入代理环境变量。
+4. `/ot pick` 如果命中已有 session，除了控制结果表格外，还会额外回一张 `历史概览` 卡片，展示裁剪后的最近 5 轮 `user / assistant` 对话。
+5. `/ot stop` 会停止当前正在运行的 turn；ACP 会发 `session/cancel`，`exec_json` 会终止本地进程。
+6. `/ot proxy` 会控制后续 ACP/exec 启动时是否注入代理环境变量。
 
 ## 控制台配置覆盖项
 

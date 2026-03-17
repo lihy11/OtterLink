@@ -78,13 +78,13 @@ core 进程内还维护：
 
 - `session_key -> active turn cancel handle`
 
-用于 `/runtime stop` 取消当前运行中的 turn。这个状态只存在内存中，服务重启后不会恢复。
+用于 `/ot stop` 取消当前运行中的 turn。这个状态只存在内存中，服务重启后不会恢复。
 
 
 
 ## 本地 Session 导入
 
-`/runtime load [workspace]` 会按当前 agent 导入历史 session：
+`/ot load [workspace]` 会按当前 agent 导入历史 session：
 
 - 首选：ACP `session/list`
 - `claude_code` 回退：`CLAUDE_HOME_DIR/projects/<workspace-key>/`

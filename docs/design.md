@@ -55,16 +55,16 @@
 设计规则：
 
 1. 普通消息只有在显式选定 session 后才会进入 runtime。
-2. `/runtime use <claude|codex>` 只切换 agent，并自动加载当前 `cwd` 下的候选 session。
-3. `/runtime pick <short_id>` 才会显式选定 session。
-4. `/runtime new` 会在当前 `agent + cwd` 下新建 session，并立即选定。
-5. `/runtime load [workspace]` 负责刷新当前 `agent + cwd` 下的候选 session，不隐式切换。
+2. `/ot use <claude|codex>` 只切换 agent，并自动加载当前 `cwd` 下的候选 session。
+3. `/ot pick <short_id>` 才会显式选定 session。
+4. `/ot new` 会在当前 `agent + cwd` 下新建 session，并立即选定。
+5. `/ot load [workspace]` 负责刷新当前 `agent + cwd` 下的候选 session，不隐式切换。
 6. `set_workspace` 会清空当前 session 选择，并要求用户重新 pick 或 new。
 7. `set_proxy` 会更新当前选择器的代理模式，影响后续 runtime 进程启动。
 8. `stop_runtime` 只取消当前进行中的 turn，不改变当前三元组选择器。
-9. `/runtime pick` 选中已有 session 后，会把 ACP `session/load` 的历史回放缓存成一份独立的 `历史概览`，单独发卡片给用户确认当前进度。
+9. `/ot pick` 选中已有 session 后，会把 ACP `session/load` 的历史回放缓存成一份独立的 `历史概览`，单独发卡片给用户确认当前进度。
 4. 控制命令优先于普通 turn，在 gateway 解析后直接走 control API。
-5. `/runtime pick` 支持完整 `runtime_id`、`runtime_session_ref` 前缀、或 label，避免在 IM 里复制长 id。
+5. `/ot pick` 支持完整 `runtime_id`、`runtime_session_ref` 前缀、或 label，避免在 IM 里复制长 id。
 
 会话导入规则：
 
@@ -81,7 +81,7 @@
 2. `default` 下按环境配置生效：`CODEX_DEFAULT_PROXY_MODE` 与 `CLAUDE_CODE_DEFAULT_PROXY_MODE`。
 3. `on` 时会注入 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY`。
 4. 代理地址优先取命令里显式传入，其次取 `ACP_PROXY_URL`，再回退现有代理环境变量。
-5. `/runtime stop` 对 ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾；如果 agent 在宽限时间内没有结束，再做强制中断。
+5. `/ot stop` 对 ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾；如果 agent 在宽限时间内没有结束，再做强制中断。
 6. 取消后如果 agent 仍发来 `session/request_permission`，bridge 会按协议返回 `Cancelled`，不再继续授权。
 7. 单轮真正的结束标识以 ACP `session/prompt` 的 `PromptResponse.stop_reason` 为准；对 `codex-acp`，正常结束是 `end_turn`，不是某个单独的 `SessionUpdate`。
 8. ACP worker 采用持久连接；`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程。

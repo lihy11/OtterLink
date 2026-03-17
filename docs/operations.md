@@ -138,19 +138,19 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 飞书里可直接发送：
 
 ```text
-/runtime help
-/runtime show
-/runtime list
-/runtime use codex
-/runtime pick c06c9a5e
-/runtime new
-/runtime load
-/runtime load /absolute/workspace
-/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
-/runtime stop
-/runtime proxy default
-/runtime proxy on http://127.0.0.1:7890
-/runtime proxy off
+/ot help
+/ot show
+/ot list
+/ot use codex
+/ot pick c06c9a5e
+/ot new
+/ot load
+/ot load /absolute/workspace
+/ot cwd ~/Desktop/InterestingPorjects/otterlink/workspace
+/ot stop
+/ot proxy default
+/ot proxy on http://127.0.0.1:7890
+/ot proxy off
 ```
 
 如果切换 agent 后没有看到候选会话，先检查：
@@ -159,10 +159,10 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 2. 当前 ACP agent 是否声明了 `session/list` 和 `loadSession` 能力。
 3. 只有 ACP `session/list` 不可用时，再检查 `claude_code` 的 `sessions-index.json` / `*.jsonl`，或 `codex` 的 `CODEX_HOME_DIR/state_5.sqlite`。
 4. workspace 是否存在 `/tmp` 与 `/private/tmp` 这样的路径别名问题。
-5. 还没有执行 `/runtime pick <short_id>` 或 `/runtime new` 时，普通消息不会进入 runtime。
-6. `/runtime stop` 只停止当前 turn，不会切换已选 agent / cwd / session；对 ACP 会先走协议取消，再在超时后强制中断。
+5. 还没有执行 `/ot pick <short_id>` 或 `/ot new` 时，普通消息不会进入 runtime。
+6. `/ot stop` 只停止当前 turn，不会切换已选 agent / cwd / session；对 ACP 会先走协议取消，再在超时后强制中断。
 7. 如果 stop 之后 agent 还在请求权限，bridge 会直接返回 `Cancelled`，不会继续放行工具调用。
-7. 如果 `codex` 需要联网但 ACP 无法访问外网，检查 `/runtime proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
+7. 如果 `codex` 需要联网但 ACP 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
 
 ## 排障
 

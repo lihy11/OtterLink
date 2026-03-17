@@ -178,19 +178,19 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 在飞书里可直接发送：
 
 ```text
-/runtime help
-/runtime show
-/runtime list
-/runtime load
-/runtime load /absolute/path
-/runtime use codex
-/runtime pick c06c9a5e
-/runtime new my-claude
-/runtime cwd ~/Desktop/InterestingPorjects/otterlink/workspace
-/runtime stop
-/runtime proxy default
-/runtime proxy on http://127.0.0.1:7890
-/runtime proxy off
+/ot help
+/ot show
+/ot list
+/ot load
+/ot load /absolute/path
+/ot use codex
+/ot pick c06c9a5e
+/ot new my-claude
+/ot cwd ~/Desktop/InterestingPorjects/otterlink/workspace
+/ot stop
+/ot proxy default
+/ot proxy on http://127.0.0.1:7890
+/ot proxy off
 ```
 
 中文别名也支持：
@@ -209,13 +209,13 @@ The default `codex` ACP launcher explicitly installs both `@zed-industries/codex
 ```
 
 这些命令不会进入普通 agent turn，而是先走 core control API，更新当前聊天里的 runtime 选择器。
-`/runtime help` 和 `会话 帮助` 由 gateway 本地处理，用于展示当前支持的命令清单。
-`/runtime use <claude|codex>` 只切换 agent 并加载当前 `cwd` 下的候选会话，不会隐式新建会话。
-`/runtime load [workspace]` 优先走 ACP `session/list`，按当前 `agent + cwd` 列出候选会话；如果 agent 不声明 `session/list` 能力，`claude_code` 才回退读取 `CLAUDE_HOME_DIR/projects/<workspace-key>/`，`codex` 才回退读取 `CODEX_HOME_DIR/state_5.sqlite`。ACP 真正恢复历史时会走协议 `session/load`；如果 agent 不声明 `loadSession` 能力，core 会直接报错，不会静默退回新会话。
-`/runtime pick <short_id>` 在切换到已有 session 后，会额外发送一张 `历史概览` 卡片。该卡片来自 ACP `session/load` 时的历史回放，只展示最近 5 轮对话，并对 user / assistant 文本做首行裁剪。
-`/runtime stop` 会停止当前正在运行的 turn。ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾，超时后才强制中断；同时对后续 `session/request_permission` 返回 `Cancelled`。正常结束以 `session/prompt` 的 `stop_reason=end_turn` 为准；`max_tokens / max_turn_requests / refusal / cancelled` 也会被单独记录。`exec_json` 兜底使用本地进程终止。
-`/runtime proxy <default|on|off> [proxy_url]` 用于控制 ACP/exec 启动时的代理注入。默认策略是 `codex=on`、`claude_code=off`。
-切换后需要显式执行 `/runtime pick <short_id>` 或 `/runtime new`，普通消息才会进入 runtime。
+`/ot help` 和 `会话 帮助` 由 gateway 本地处理，用于展示当前支持的命令清单。
+`/ot use <claude|codex>` 只切换 agent 并加载当前 `cwd` 下的候选会话，不会隐式新建会话。
+`/ot load [workspace]` 优先走 ACP `session/list`，按当前 `agent + cwd` 列出候选会话；如果 agent 不声明 `session/list` 能力，`claude_code` 才回退读取 `CLAUDE_HOME_DIR/projects/<workspace-key>/`，`codex` 才回退读取 `CODEX_HOME_DIR/state_5.sqlite`。ACP 真正恢复历史时会走协议 `session/load`；如果 agent 不声明 `loadSession` 能力，core 会直接报错，不会静默退回新会话。
+`/ot pick <short_id>` 在切换到已有 session 后，会额外发送一张 `历史概览` 卡片。该卡片来自 ACP `session/load` 时的历史回放，只展示最近 5 轮对话，并对 user / assistant 文本做首行裁剪。
+`/ot stop` 会停止当前正在运行的 turn。ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾，超时后才强制中断；同时对后续 `session/request_permission` 返回 `Cancelled`。正常结束以 `session/prompt` 的 `stop_reason=end_turn` 为准；`max_tokens / max_turn_requests / refusal / cancelled` 也会被单独记录。`exec_json` 兜底使用本地进程终止。
+`/ot proxy <default|on|off> [proxy_url]` 用于控制 ACP/exec 启动时的代理注入。默认策略是 `codex=on`、`claude_code=off`。
+切换后需要显式执行 `/ot pick <short_id>` 或 `/ot new`，普通消息才会进入 runtime。
 控制结果会以飞书卡片里的 Markdown 表格展示。
 表格前只展示当前 `Agent` 和 `CWD` 摘要，表格列为 `状态 / Tag / 短ID / Prompt`。
 

@@ -47,7 +47,7 @@ Response:
 ```json
 {
   "ok": true,
-  "message": "已切换到 `codex`，请从下方选择会话，或执行 `/runtime new`。",
+  "message": "已切换到 `codex`，请从下方选择会话，或执行 `/ot new`。",
   "selector": {
     "agent_kind": "codex",
     "workspace_path": "/Users/.../otterlink",
@@ -161,23 +161,23 @@ Rust core 通过 `AgentRuntime` 统一调用 agent。
 
 Gateway 当前支持：
 
-- `/runtime help`
-- `/runtime show`
-- `/runtime list`
-- `/runtime load [workspace]`
-- `/runtime use <claude|codex>`
-- `/runtime pick <runtime_id|runtime_session_ref 前缀|label>`
-- `/runtime new <label>`
-- `/runtime cwd <path>`
-- `/runtime stop`
-- `/runtime proxy <default|on|off> [proxy_url]`
+- `/ot help`
+- `/ot show`
+- `/ot list`
+- `/ot load [workspace]`
+- `/ot use <claude|codex>`
+- `/ot pick <runtime_id|runtime_session_ref 前缀|label>`
+- `/ot new <label>`
+- `/ot cwd <path>`
+- `/ot stop`
+- `/ot proxy <default|on|off> [proxy_url]`
 
-`/runtime use <claude|codex>` 只切换当前 agent，并自动加载当前 `cwd` 下的候选会话。
-`/runtime pick` 才会显式选定会话。
-`/runtime pick` 成功后，如果 ACP `session/load` 提供了历史回放，gateway 会额外发送一张 `历史概览` 卡片，显示裁剪后的最近 5 轮 `- user / - assistant` 对话。
-`/runtime stop` 会停止当前正在运行的 turn；ACP 会先发送 `session/cancel` 并等待 `cancelled` 收尾，超时后才强制中断；`exec_json` 直接终止本地进程。
-`/runtime proxy` 会更新当前选择器的代理策略，影响后续 ACP/exec 启动时注入的 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY`。
-`/runtime load` 会优先按当前 agent 调用 ACP `session/list`：
+`/ot use <claude|codex>` 只切换当前 agent，并自动加载当前 `cwd` 下的候选会话。
+`/ot pick` 才会显式选定会话。
+`/ot pick` 成功后，如果 ACP `session/load` 提供了历史回放，gateway 会额外发送一张 `历史概览` 卡片，显示裁剪后的最近 5 轮 `- user / - assistant` 对话。
+`/ot stop` 会停止当前正在运行的 turn；ACP 会先发送 `session/cancel` 并等待 `cancelled` 收尾，超时后才强制中断；`exec_json` 直接终止本地进程。
+`/ot proxy` 会更新当前选择器的代理策略，影响后续 ACP/exec 启动时注入的 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY`。
+`/ot load` 会优先按当前 agent 调用 ACP `session/list`：
 
 - `claude_code`: 不支持 `session/list` 时，回退到 `CLAUDE_HOME_DIR/projects/<workspace-key>/`
 - `codex`: 不支持 `session/list` 时，回退到 `CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表按 `cwd` 过滤
@@ -187,8 +187,8 @@ ACP 真正恢复历史时会调用 `session/load`。如果 agent 没有声明 `l
 ACP 单轮是否结束，以 `session/prompt` 的 `PromptResponse.stop_reason` 为准。`codex-acp` 的正常收尾是 `end_turn`；`cancelled / max_tokens / max_turn_requests / refusal` 也都会被记录到 runtime completion。
 ACP worker 使用持久连接，`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程。
 
-`/runtime help` 由 gateway 本地响应，不调用 core。
-拼错的 `/runtime` 子命令或缺参数情况，也会在 gateway 直接报错，不会进入普通 agent turn。
+`/ot help` 由 gateway 本地响应，不调用 core。
+拼错的 `/ot` 子命令或缺参数情况，也会在 gateway 直接报错，不会进入普通 agent turn。
 优先使用 `sessions-index.json`；如果索引不存在，会回退扫描 `*.jsonl` 头部元数据。
 控制结果会渲染为 Markdown 表格卡片。
 表格前只保留当前 `Agent / CWD / Proxy / Session` 摘要，表格列为 `状态 / Tag / 短ID / Prompt`。

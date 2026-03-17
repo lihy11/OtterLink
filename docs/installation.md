@@ -13,7 +13,7 @@
 - 可用 `journalctl` 集中看日志
 - 支持 `systemctl reload` 触发受控重启
 
-运行后可通过飞书 `/runtime stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖 shell 注入 `Ctrl+C`。
+运行后可通过飞书 `/ot stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖 shell 注入 `Ctrl+C`。
 
 ## 依赖
 
@@ -72,7 +72,7 @@ sudo chown -R "$USER":"$(id -gn)" /etc/otterlink /var/lib/otterlink
 
 若先走本地 CLI 配置，也可以直接把 `.run/feishu.env` 的内容整理后迁移到 `/etc/otterlink/otterlink.env`。
 
-如果你需要在飞书里对 `codex` 执行 `/runtime load`，记得把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`。
+如果你需要在飞书里对 `codex` 执行 `/ot load`，记得把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`。
 
 ## 安装 systemd 单元
 

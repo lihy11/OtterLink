@@ -510,7 +510,7 @@ test('final card delivery failure falls back to plain text instead of crashing',
   assert.match(calls.replies[1].rendered.content.text, /final body/);
 });
 
-test('runtime control command is routed to core control api instead of normal turn api', async () => {
+test('ot control command is routed to core control api instead of normal turn api', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -518,7 +518,7 @@ test('runtime control command is routed to core control api instead of normal tu
       message_id: 'om_5',
       chat_id: 'oc_5',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime list' }),
+      content: JSON.stringify({ text: '/ot list' }),
     },
   });
 
@@ -528,7 +528,7 @@ test('runtime control command is routed to core control api instead of normal tu
   assert.equal(calls.cardReplies.length, 1);
 });
 
-test('common typo /rumtime cwd is still routed to core control api', async () => {
+test('ot cwd is routed to core control api', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -536,7 +536,7 @@ test('common typo /rumtime cwd is still routed to core control api', async () =>
       message_id: 'om_cwd_typo',
       chat_id: 'oc_cwd_typo',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/rumtime cwd ~/MultiPerspectiveCloneEval' }),
+      content: JSON.stringify({ text: '/ot cwd ~/MultiPerspectiveCloneEval' }),
     },
   });
 
@@ -547,7 +547,7 @@ test('common typo /rumtime cwd is still routed to core control api', async () =>
   assert.equal(calls.controls[0].workspace_path, '~/MultiPerspectiveCloneEval');
 });
 
-test('runtime proxy command accepts shorthand url without explicit on', async () => {
+test('ot proxy command accepts shorthand url without explicit on', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -555,7 +555,7 @@ test('runtime proxy command accepts shorthand url without explicit on', async ()
       message_id: 'om_proxy_short',
       chat_id: 'oc_proxy_short',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime proxy http://127.0.0.1:7890' }),
+      content: JSON.stringify({ text: '/ot proxy http://127.0.0.1:7890' }),
     },
   });
 
@@ -567,7 +567,7 @@ test('runtime proxy command accepts shorthand url without explicit on', async ()
   assert.equal(calls.controls[0].proxy_url, 'http://127.0.0.1:7890');
 });
 
-test('runtime help command is handled in gateway without calling core', async () => {
+test('ot help command is handled in gateway without calling core', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -575,7 +575,7 @@ test('runtime help command is handled in gateway without calling core', async ()
       message_id: 'om_help',
       chat_id: 'oc_help',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime help' }),
+      content: JSON.stringify({ text: '/ot help' }),
     },
   });
 
@@ -585,7 +585,7 @@ test('runtime help command is handled in gateway without calling core', async ()
   assert.equal(calls.cardReplies.length, 1);
 });
 
-test('unknown runtime subcommand is rejected in gateway and not forwarded to core or agent', async () => {
+test('unknown ot subcommand is rejected in gateway and not forwarded to core or agent', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -593,7 +593,7 @@ test('unknown runtime subcommand is rejected in gateway and not forwarded to cor
       message_id: 'om_bad_rt',
       chat_id: 'oc_bad_rt',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime hel' }),
+      content: JSON.stringify({ text: '/ot hel' }),
     },
   });
 
@@ -602,10 +602,10 @@ test('unknown runtime subcommand is rejected in gateway and not forwarded to cor
   assert.equal((calls.controls || []).length, 0);
   assert.equal(calls.replies.length, 1);
   assert.match(JSON.stringify(calls.replies[0].rendered), /Runtime 命令错误/);
-  assert.match(JSON.stringify(calls.replies[0].rendered), /runtime help/);
+  assert.match(JSON.stringify(calls.replies[0].rendered), /ot help/);
 });
 
-test('runtime use without agent argument is rejected in gateway', async () => {
+test('ot use without agent argument is rejected in gateway', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -613,7 +613,7 @@ test('runtime use without agent argument is rejected in gateway', async () => {
       message_id: 'om_use_missing',
       chat_id: 'oc_use_missing',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime use' }),
+      content: JSON.stringify({ text: '/ot use' }),
     },
   });
 
@@ -624,7 +624,7 @@ test('runtime use without agent argument is rejected in gateway', async () => {
   assert.match(JSON.stringify(calls.replies[0].rendered), /claude\|codex/);
 });
 
-test('runtime load command is routed to core control api with workspace path', async () => {
+test('ot load command is routed to core control api with workspace path', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -632,7 +632,7 @@ test('runtime load command is routed to core control api with workspace path', a
       message_id: 'om_6',
       chat_id: 'oc_6',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime load /tmp/demo-workspace' }),
+      content: JSON.stringify({ text: '/ot load /tmp/demo-workspace' }),
     },
   });
 
@@ -643,7 +643,7 @@ test('runtime load command is routed to core control api with workspace path', a
   assert.equal(calls.controls[0].workspace_path, '/tmp/demo-workspace');
 });
 
-test('runtime cwd command is routed to core control api as set_workspace', async () => {
+test('ot cwd command is routed to core control api as set_workspace', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -651,7 +651,7 @@ test('runtime cwd command is routed to core control api as set_workspace', async
       message_id: 'om_cwd',
       chat_id: 'oc_cwd',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime cwd /tmp/demo-cwd' }),
+      content: JSON.stringify({ text: '/ot cwd /tmp/demo-cwd' }),
     },
   });
 
@@ -662,7 +662,7 @@ test('runtime cwd command is routed to core control api as set_workspace', async
   assert.equal(calls.controls[0].workspace_path, '/tmp/demo-cwd');
 });
 
-test('runtime use command is routed to core control api as use_agent', async () => {
+test('ot use command is routed to core control api as use_agent', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -670,7 +670,7 @@ test('runtime use command is routed to core control api as use_agent', async () 
       message_id: 'om_use',
       chat_id: 'oc_use',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime use codex' }),
+      content: JSON.stringify({ text: '/ot use codex' }),
     },
   });
 
@@ -680,7 +680,7 @@ test('runtime use command is routed to core control api as use_agent', async () 
   assert.equal(calls.controls[0].agent_kind, 'codex');
 });
 
-test('runtime proxy command is routed to core control api as set_proxy', async () => {
+test('ot proxy command is routed to core control api as set_proxy', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -688,7 +688,7 @@ test('runtime proxy command is routed to core control api as set_proxy', async (
       message_id: 'om_proxy',
       chat_id: 'oc_proxy',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime proxy on http://127.0.0.1:7890' }),
+      content: JSON.stringify({ text: '/ot proxy on http://127.0.0.1:7890' }),
     },
   });
 
@@ -699,7 +699,7 @@ test('runtime proxy command is routed to core control api as set_proxy', async (
   assert.equal(calls.controls[0].proxy_url, 'http://127.0.0.1:7890');
 });
 
-test('runtime stop command is routed to core control api as stop_runtime', async () => {
+test('ot stop command is routed to core control api as stop_runtime', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -707,7 +707,7 @@ test('runtime stop command is routed to core control api as stop_runtime', async
       message_id: 'om_stop',
       chat_id: 'oc_stop',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime stop' }),
+      content: JSON.stringify({ text: '/ot stop' }),
     },
   });
 
@@ -716,7 +716,7 @@ test('runtime stop command is routed to core control api as stop_runtime', async
   assert.equal(calls.controls[0].action, 'stop_runtime');
 });
 
-test('runtime pick command is routed to core control api as switch_runtime', async () => {
+test('ot pick command is routed to core control api as switch_runtime', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -724,7 +724,7 @@ test('runtime pick command is routed to core control api as switch_runtime', asy
       message_id: 'om_pick',
       chat_id: 'oc_pick',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime pick c06c9a5e' }),
+      content: JSON.stringify({ text: '/ot pick c06c9a5e' }),
     },
   });
 
@@ -734,7 +734,7 @@ test('runtime pick command is routed to core control api as switch_runtime', asy
   assert.equal(calls.controls[0].runtime_selector, 'c06c9a5e');
 });
 
-test('runtime pick sends a second history overview card when core returns session history', async () => {
+test('ot pick sends a second history overview card when core returns session history', async () => {
   const { service, calls } = makeService({
     coreClient: {
       async submitTurn(turnRequest) {
@@ -783,7 +783,7 @@ test('runtime pick sends a second history overview card when core returns sessio
       message_id: 'om_pick_history',
       chat_id: 'oc_pick_history',
       chat_type: 'p2p',
-      content: JSON.stringify({ text: '/runtime pick sess-his' }),
+      content: JSON.stringify({ text: '/ot pick sess-his' }),
     },
   });
 
@@ -800,7 +800,7 @@ test('turn rejection from core is replied back to feishu user', async () => {
   const { service, calls } = makeService({
     coreClient: {
       async submitTurn() {
-        throw new Error('core submit failed status=400 error=请先执行 /runtime pick <short_id> 或 /runtime new');
+        throw new Error('core submit failed status=400 error=请先执行 /ot pick <short_id> 或 /ot new');
       },
       async controlSession() {
         throw new Error('should not be called');
@@ -820,7 +820,7 @@ test('turn rejection from core is replied back to feishu user', async () => {
 
   assert.equal(result.reason, 'turn_rejected');
   assert.equal(calls.replies.length, 1);
-  assert.match(JSON.stringify(calls.replies[0].rendered), /runtime pick/);
+  assert.match(JSON.stringify(calls.replies[0].rendered), /ot pick/);
 });
 
 test('renderControlResponse builds a card with runtime rows', async () => {
@@ -873,15 +873,15 @@ test('renderControlResponse builds a card with runtime rows', async () => {
   assert.match(body, /CWD: `\/tmp\/demo`/);
 });
 
-test('renderRuntimeHelp lists supported runtime commands', async () => {
+test('renderRuntimeHelp lists supported ot commands', async () => {
   const message = renderRuntimeHelp();
   assert.equal(message.kind, 'card');
   const body = JSON.stringify(message.card.blocks);
-  assert.match(body, /runtime help/);
-  assert.match(body, /runtime list/);
-  assert.match(body, /runtime use/);
-  assert.match(body, /runtime pick/);
-  assert.match(body, /runtime cwd/);
-  assert.match(body, /runtime proxy/);
+  assert.match(body, /ot help/);
+  assert.match(body, /ot list/);
+  assert.match(body, /ot use/);
+  assert.match(body, /ot pick/);
+  assert.match(body, /ot cwd/);
+  assert.match(body, /ot proxy/);
   assert.match(body, /会话 帮助/);
 });

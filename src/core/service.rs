@@ -227,9 +227,9 @@ impl CoreService {
                 CoreControlResponse {
                     ok: true,
                     message: if runtimes.is_empty() {
-                        format!("`{}` 在当前 workspace 下还没有可选会话，请执行 `/runtime new`。", selector.agent_kind)
+                        format!("`{}` 在当前 workspace 下还没有可选会话，请执行 `/ot new`。", selector.agent_kind)
                     } else {
-                        format!("当前共有 {} 个可选会话，请执行 `/runtime pick <short_id>`。", runtimes.len())
+                        format!("当前共有 {} 个可选会话，请执行 `/ot pick <short_id>`。", runtimes.len())
                     },
                     selector: Some(selector_summary(&selector)),
                     active_runtime: self
@@ -258,12 +258,12 @@ impl CoreService {
                     ok: true,
                     message: if runtimes.is_empty() {
                         format!(
-                            "`{}` 在 `{}` 下没有可选会话，请执行 `/runtime new`。",
+                            "`{}` 在 `{}` 下没有可选会话，请执行 `/ot new`。",
                             updated_selector.agent_kind, workspace
                         )
                     } else {
                         format!(
-                            "`{}` 已在 `{}` 下加载 {} 个会话，请执行 `/runtime pick <short_id>`。",
+                            "`{}` 已在 `{}` 下加载 {} 个会话，请执行 `/ot pick <short_id>`。",
                             updated_selector.agent_kind,
                             workspace,
                             runtimes.len().max(imported)
@@ -301,9 +301,9 @@ impl CoreService {
                 CoreControlResponse {
                     ok: true,
                     message: if runtimes.is_empty() {
-                        format!("已切换到 `{}`，当前 workspace 下暂无可选会话，请执行 `/runtime new`。", agent_kind)
+                        format!("已切换到 `{}`，当前 workspace 下暂无可选会话，请执行 `/ot new`。", agent_kind)
                     } else {
-                        format!("已切换到 `{}`，请从下方选择会话，或执行 `/runtime new`。", agent_kind)
+                        format!("已切换到 `{}`，请从下方选择会话，或执行 `/ot new`。", agent_kind)
                     },
                     selector: Some(selector_summary(&updated_selector)),
                     active_runtime: None,
@@ -410,7 +410,7 @@ impl CoreService {
                 CoreControlResponse {
                     ok: true,
                     message: if runtimes.is_empty() {
-                        format!("当前 workspace 已切换到 `{}`，暂无可选会话，请执行 `/runtime new`。", workspace)
+                        format!("当前 workspace 已切换到 `{}`，暂无可选会话，请执行 `/ot new`。", workspace)
                     } else {
                         format!("当前 workspace 已切换到 `{}`，请重新选择会话。", workspace)
                     },
@@ -1109,7 +1109,7 @@ fn selector_summary(selection: &RuntimeSelection) -> RuntimeSelectorSummary {
 
 fn missing_runtime_selection_message(selection: &RuntimeSelection) -> String {
     format!(
-        "当前还没有选定会话。当前 agent 为 `{}`，workspace 为 `{}`。`/runtime use <claude|codex>` 和 `/runtime cwd <path>` 可以按任意顺序调整，准备好后再执行 `/runtime pick <short_id>` 或 `/runtime new`。",
+        "当前还没有选定会话。当前 agent 为 `{}`，workspace 为 `{}`。`/ot use <claude|codex>` 和 `/ot cwd <path>` 可以按任意顺序调整，准备好后再执行 `/ot pick <short_id>` 或 `/ot new`。",
         selection.agent_kind, selection.workspace_path
     )
 }
@@ -2213,8 +2213,8 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("当前还没有选定会话"));
         assert!(message.contains("可以按任意顺序调整"));
-        assert!(message.contains("/runtime cwd <path>"));
-        assert!(message.contains("/runtime pick <short_id>` 或 `/runtime new`"));
+        assert!(message.contains("/ot cwd <path>"));
+        assert!(message.contains("/ot pick <short_id>` 或 `/ot new`"));
     }
 
     #[tokio::test]
