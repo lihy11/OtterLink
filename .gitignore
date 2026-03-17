@@ -3,6 +3,8 @@
 /longconn/node_modules/
 /gateway/node_modules/
 /workspace/
+/deploy/systemd/otterlink.env
+/deploy/systemd/*.local.env
 .DS_Store
 **/.DS_Store
 ._*
