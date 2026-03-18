@@ -11,6 +11,14 @@ function shouldRestartWsClient(reconnectInfo, now = Date.now(), stallTimeoutMs =
   return true;
 }
 
+function shouldRestartIdleWsClient(lastWsEventAt, now = Date.now(), idleTimeoutMs = 300000) {
+  if (!Number.isFinite(lastWsEventAt) || lastWsEventAt <= 0) {
+    return false;
+  }
+  return now - lastWsEventAt >= idleTimeoutMs;
+}
+
 module.exports = {
   shouldRestartWsClient,
+  shouldRestartIdleWsClient,
 };

@@ -24,8 +24,9 @@ function loadConfig(env = process.env) {
     allowFromOpenIds: parseList(env.ALLOW_FROM_OPEN_IDS),
     pairStorePath: env.PAIR_STORE_PATH || path.join(process.cwd(), '.run', 'pairings.json'),
     disableWs: matchesTrue(env.FEISHU_DISABLE_WS),
-    feishuWsWatchdogIntervalMs: parsePositiveInt(env.FEISHU_WS_WATCHDOG_INTERVAL_MS, 30000),
-    feishuWsStallTimeoutMs: parsePositiveInt(env.FEISHU_WS_STALL_TIMEOUT_MS, 180000),
+    feishuWsWatchdogIntervalMs: parsePositiveInt(env.FEISHU_WS_WATCHDOG_INTERVAL_MS, 15000),
+    feishuWsStallTimeoutMs: parsePositiveInt(env.FEISHU_WS_STALL_TIMEOUT_MS, 120000),
+    feishuWsIdleRestartMs: parsePositiveInt(env.FEISHU_WS_IDLE_RESTART_MS, 60000),
   };
 }
 

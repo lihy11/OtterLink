@@ -173,6 +173,13 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 3. gateway 能启动但不收事件
    检查飞书机器人事件订阅和 `im.message.receive_v1` 权限。
    若 `.run/gateway.log` 出现 `getaddrinfo EAI_AGAIN open.feishu.cn` 且后续没有新的 inbound event，说明长连接重连失败；当前 gateway 会在重连计划超时后自动重建 WS client。
+   若长连接没有任何报错，但长时间没有新的 `ws raw event`，当前 gateway 也会按 `FEISHU_WS_IDLE_RESTART_MS` 自动重建 WS client。
+   若飞书聊天里看到某条 `/ot ...` 没有生效，先按下面顺序检查：
+   - 有 `ws raw event`：说明飞书 SDK 已经收到事件
+   - 有 `inbound feishu event`：说明 gateway 业务入口已收到事件
+   - 有 `replied message`：说明 gateway 已成功调用飞书发送回复
+   - 若缺少 `ws raw event`，问题在 gateway 之前，常见原因是长连接静默失联、网络/DNS 抖动，或同一飞书应用存在其他长连接客户端竞争消息
+   - 若 `show` 返回旧 workspace，而前面刚发过 `cwd`，优先检查对应 `cwd` 是否真的有 `ws raw event`；如果没有，说明不是状态覆盖，而是那条命令根本没投递到当前实例
 4. Rust 有输出但飞书没回写
    检查 `GATEWAY_EVENT_TOKEN` 是否和 gateway 配置一致。
 5. gateway 提交 turn 失败

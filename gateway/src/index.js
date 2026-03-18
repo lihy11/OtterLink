@@ -4,7 +4,7 @@ const Lark = require('@larksuiteoapi/node-sdk');
 const { loadConfig } = require('./config');
 const { CoreClient } = require('./core-client');
 const { FeishuClient } = require('./feishu/client');
-const { shouldRestartWsClient } = require('./feishu/ws-watchdog');
+const { shouldRestartWsClient, shouldRestartIdleWsClient } = require('./feishu/ws-watchdog');
 const { GatewayService } = require('./service');
 const { PairingStore } = require('./store/pairings');
 
@@ -71,7 +71,11 @@ async function main() {
   let wsClient = null;
   let wsWatchdog = null;
   let wsRestarting = false;
+  let lastWsEventAt = 0;
   if (!config.disableWs) {
+    console.log(
+      `[gateway] Feishu WS watchdog interval=${config.feishuWsWatchdogIntervalMs}ms stall=${config.feishuWsStallTimeoutMs}ms idle=${config.feishuWsIdleRestartMs}ms`,
+    );
     const dispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data) => {
         try {
@@ -92,6 +96,7 @@ async function main() {
               content: wsMessage.content || null,
             }),
           );
+          lastWsEventAt = Date.now();
           await service.handleFeishuEvent(data);
         } catch (error) {
           console.error('[gateway] feishu event failed', error);
@@ -107,6 +112,7 @@ async function main() {
         loggerLevel: Lark.LoggerLevel.info,
       });
       wsClient.start({ eventDispatcher: dispatcher });
+      lastWsEventAt = Date.now();
       console.log('[gateway] Feishu WS client started');
     };
 
@@ -131,15 +137,22 @@ async function main() {
         return;
       }
       const reconnectInfo = wsClient.getReconnectInfo?.();
-      if (!shouldRestartWsClient(
+      const now = Date.now();
+      if (shouldRestartWsClient(
         reconnectInfo,
-        Date.now(),
+        now,
         config.feishuWsStallTimeoutMs,
       )) {
+        restartWsClient(
+          `stalled reconnect; last_connect=${reconnectInfo.lastConnectTime || 0}, next_connect=${reconnectInfo.nextConnectTime || 0}`,
+        );
+        return;
+      }
+      if (!shouldRestartIdleWsClient(lastWsEventAt, now, config.feishuWsIdleRestartMs)) {
         return;
       }
       restartWsClient(
-        `stalled reconnect; last_connect=${reconnectInfo.lastConnectTime || 0}, next_connect=${reconnectInfo.nextConnectTime || 0}`,
+        `idle websocket; last_ws_event=${lastWsEventAt}`,
       );
     }, config.feishuWsWatchdogIntervalMs);
   }
