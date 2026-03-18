@@ -24,11 +24,18 @@ function loadConfig(env = process.env) {
     allowFromOpenIds: parseList(env.ALLOW_FROM_OPEN_IDS),
     pairStorePath: env.PAIR_STORE_PATH || path.join(process.cwd(), '.run', 'pairings.json'),
     disableWs: matchesTrue(env.FEISHU_DISABLE_WS),
+    feishuWsWatchdogIntervalMs: parsePositiveInt(env.FEISHU_WS_WATCHDOG_INTERVAL_MS, 30000),
+    feishuWsStallTimeoutMs: parsePositiveInt(env.FEISHU_WS_STALL_TIMEOUT_MS, 180000),
   };
 }
 
 function matchesTrue(value) {
   return ['1', 'true', 'TRUE', 'yes', 'YES'].includes(String(value || ''));
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 module.exports = {

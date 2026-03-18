@@ -528,6 +528,65 @@ test('ot control command is routed to core control api instead of normal turn ap
   assert.equal(calls.cardReplies.length, 1);
 });
 
+test('control commands are serialized within the same session', async () => {
+  const callOrder = [];
+  let releaseFirst = null;
+  const waitForFirst = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const { service } = makeService({
+    coreClient: {
+      async submitTurn(turnRequest) {
+        return { ok: true, turn_id: turnRequest.turn_id };
+      },
+      async controlSession(controlRequest) {
+        callOrder.push(controlRequest.action);
+        if (controlRequest.action === 'set_workspace') {
+          await waitForFirst;
+        }
+        return {
+          ok: true,
+          message: 'runtime ok',
+          selector: {
+            agent_kind: 'codex',
+            workspace_path: controlRequest.workspace_path || '/tmp/demo',
+            has_selected_runtime: false,
+          },
+          active_runtime: null,
+          runtimes: [],
+        };
+      },
+    },
+  });
+
+  const first = service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_serial_cwd',
+      chat_id: 'oc_serial',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: '/ot cwd /tmp/demo-cwd' }),
+    },
+  });
+  const second = service.handleFeishuEvent({
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_serial_show',
+      chat_id: 'oc_serial',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: '/ot show' }),
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(callOrder, ['set_workspace']);
+
+  releaseFirst();
+  await first;
+  await second;
+  assert.deepEqual(callOrder, ['set_workspace', 'show_runtime']);
+});
+
 test('ot cwd is routed to core control api', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({

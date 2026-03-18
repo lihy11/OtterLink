@@ -4,6 +4,7 @@ const Lark = require('@larksuiteoapi/node-sdk');
 const { loadConfig } = require('./config');
 const { CoreClient } = require('./core-client');
 const { FeishuClient } = require('./feishu/client');
+const { shouldRestartWsClient } = require('./feishu/ws-watchdog');
 const { GatewayService } = require('./service');
 const { PairingStore } = require('./store/pairings');
 
@@ -68,10 +69,29 @@ async function main() {
   });
 
   let wsClient = null;
+  let wsWatchdog = null;
+  let wsRestarting = false;
   if (!config.disableWs) {
     const dispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data) => {
         try {
+          const wsEvent = data && data.event ? data.event : data;
+          const wsMessage = wsEvent && wsEvent.message ? wsEvent.message : {};
+          const wsSender = wsEvent && wsEvent.sender ? wsEvent.sender : {};
+          console.log(
+            '[gateway] ws raw event',
+            JSON.stringify({
+              message_id: wsMessage.message_id || null,
+              chat_id: wsMessage.chat_id || null,
+              chat_type: wsMessage.chat_type || null,
+              open_id:
+                wsSender.sender_id && wsSender.sender_id.open_id
+                  ? wsSender.sender_id.open_id
+                  : null,
+              message_type: wsMessage.message_type || null,
+              content: wsMessage.content || null,
+            }),
+          );
           await service.handleFeishuEvent(data);
         } catch (error) {
           console.error('[gateway] feishu event failed', error);
@@ -80,13 +100,48 @@ async function main() {
       },
     });
 
-    wsClient = new Lark.WSClient({
-      appId: config.appId,
-      appSecret: config.appSecret,
-      loggerLevel: Lark.LoggerLevel.info,
-    });
-    wsClient.start({ eventDispatcher: dispatcher });
-    console.log('[gateway] Feishu WS client started');
+    const startWsClient = () => {
+      wsClient = new Lark.WSClient({
+        appId: config.appId,
+        appSecret: config.appSecret,
+        loggerLevel: Lark.LoggerLevel.info,
+      });
+      wsClient.start({ eventDispatcher: dispatcher });
+      console.log('[gateway] Feishu WS client started');
+    };
+
+    const restartWsClient = (reason) => {
+      if (wsRestarting || shuttingDown) {
+        return;
+      }
+      wsRestarting = true;
+      console.warn(`[gateway] restarting Feishu WS client: ${reason}`);
+      try {
+        wsClient?.close?.({ force: true });
+      } catch (error) {
+        console.error('[gateway] failed to close stale Feishu WS client', error);
+      }
+      startWsClient();
+      wsRestarting = false;
+    };
+
+    startWsClient();
+    wsWatchdog = setInterval(() => {
+      if (!wsClient || wsRestarting || shuttingDown) {
+        return;
+      }
+      const reconnectInfo = wsClient.getReconnectInfo?.();
+      if (!shouldRestartWsClient(
+        reconnectInfo,
+        Date.now(),
+        config.feishuWsStallTimeoutMs,
+      )) {
+        return;
+      }
+      restartWsClient(
+        `stalled reconnect; last_connect=${reconnectInfo.lastConnectTime || 0}, next_connect=${reconnectInfo.nextConnectTime || 0}`,
+      );
+    }, config.feishuWsWatchdogIntervalMs);
   }
 
   let shuttingDown = false;
@@ -95,6 +150,10 @@ async function main() {
       return;
     }
     shuttingDown = true;
+    if (wsWatchdog) {
+      clearInterval(wsWatchdog);
+      wsWatchdog = null;
+    }
     console.log(`[gateway] ${reason}`);
     if (wsClient) {
       wsClient.close();

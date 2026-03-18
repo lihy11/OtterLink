@@ -15,6 +15,7 @@ class GatewayService {
     this.pairings = pairings;
     this.logger = logger;
     this.turnContexts = new Map();
+    this.sessionQueues = new Map();
   }
 
   async handleFeishuEvent(payload) {
@@ -47,6 +48,10 @@ class GatewayService {
     }
 
     const route = buildSessionRoute(inbound);
+    return this.enqueueForSession(route.sessionKey, () => this.handleSessionEvent(inbound, route));
+  }
+
+  async handleSessionEvent(inbound, route) {
     const controlCommand = parseControlCommand(inbound.text);
     if (controlCommand) {
       if (controlCommand.local_action === 'runtime_help') {
@@ -103,6 +108,18 @@ class GatewayService {
     }
 
     return { accepted: true, turnId, sessionKey: route.sessionKey };
+  }
+
+  enqueueForSession(sessionKey, handler) {
+    const previous = this.sessionQueues.get(sessionKey) || Promise.resolve();
+    const next = previous.catch(() => undefined).then(handler);
+    const cleanup = next.finally(() => {
+      if (this.sessionQueues.get(sessionKey) === cleanup) {
+        this.sessionQueues.delete(sessionKey);
+      }
+    });
+    this.sessionQueues.set(sessionKey, cleanup);
+    return next;
   }
 
   async handleCoreEvent(event) {
@@ -231,9 +248,27 @@ class GatewayService {
     const rendered = renderOutboundMessage(message);
     if (rendered.transport === 'cardkit') {
       const sent = await this.feishuClient.replyCardKitToMessage(messageId, rendered.card);
+      this.logger.log?.(
+        '[gateway] replied message',
+        JSON.stringify({
+          reply_to: messageId,
+          transport: 'cardkit',
+          sent_message_id: sent.messageId || null,
+          card_id: sent.cardId || null,
+        }),
+      );
       return sent.messageId;
     }
-    return this.feishuClient.replyToMessage(messageId, rendered);
+    const sentMessageId = await this.feishuClient.replyToMessage(messageId, rendered);
+    this.logger.log?.(
+      '[gateway] replied message',
+      JSON.stringify({
+        reply_to: messageId,
+        transport: rendered.msg_type || 'text',
+        sent_message_id: sentMessageId || null,
+      }),
+    );
+    return sentMessageId;
   }
 
   updateSlotState(context, slotKey, nextState) {

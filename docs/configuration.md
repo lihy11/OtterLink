@@ -15,6 +15,8 @@
 - `ALLOW_FROM_OPEN_IDS`: 逗号分隔白名单
 - `PAIR_STORE_PATH`: 配对存储路径
 - `FEISHU_DISABLE_WS=1`: 仅启动 HTTP，不连飞书 WebSocket
+- `FEISHU_WS_WATCHDOG_INTERVAL_MS`: WebSocket 健康巡检间隔，默认 `30000`
+- `FEISHU_WS_STALL_TIMEOUT_MS`: 当飞书 SDK 的下一次重连时间已过且仍未恢复时，判定为卡死并重建 WS client，默认 `180000`
 - `otterlink configure` 会交互式维护 `.run/feishu.env`
 - Linux `systemd` 部署时建议统一放进 `/etc/otterlink/otterlink.env`
 - macOS `launchd` 默认会读取 `.run/feishu.env`，也可通过 `ENV_FILE=... ./scripts/install-launchd.sh` 覆盖

@@ -172,6 +172,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
    检查 `BIND`、`APP_ID`、`APP_SECRET`，查看 `.run/gateway.log`。
 3. gateway 能启动但不收事件
    检查飞书机器人事件订阅和 `im.message.receive_v1` 权限。
+   若 `.run/gateway.log` 出现 `getaddrinfo EAI_AGAIN open.feishu.cn` 且后续没有新的 inbound event，说明长连接重连失败；当前 gateway 会在重连计划超时后自动重建 WS client。
 4. Rust 有输出但飞书没回写
    检查 `GATEWAY_EVENT_TOKEN` 是否和 gateway 配置一致。
 5. gateway 提交 turn 失败
