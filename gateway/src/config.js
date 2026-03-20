@@ -24,6 +24,7 @@ function loadConfig(env = process.env) {
     allowFromOpenIds: parseList(env.ALLOW_FROM_OPEN_IDS),
     pairStorePath: env.PAIR_STORE_PATH || path.join(process.cwd(), '.run', 'pairings.json'),
     disableWs: matchesTrue(env.FEISHU_DISABLE_WS),
+    feishuDedupTtlMs: parseNonNegativeInt(env.FEISHU_DEDUP_TTL_MS, 10 * 60 * 1000),
     feishuWsWatchdogIntervalMs: parsePositiveInt(env.FEISHU_WS_WATCHDOG_INTERVAL_MS, 15000),
     feishuWsStallTimeoutMs: parsePositiveInt(env.FEISHU_WS_STALL_TIMEOUT_MS, 120000),
     feishuWsIdleRestartMs: parseNonNegativeInt(env.FEISHU_WS_IDLE_RESTART_MS, 0),

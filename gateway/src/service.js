@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 
 const { parseControlCommand, renderControlResponse, renderHistoryOverview, renderRuntimeHelp } = require('./commands');
 const { isAuthorized, parsePairCommand, unauthorizedHint, validatePairRequest } = require('./feishu/auth');
+const { MessageDeduper } = require('./feishu/dedup');
 const { renderCardMarkdown, renderOutboundMessage } = require('./feishu/render');
 const { buildSessionRoute, normalizeFeishuEvent } = require('./feishu/session');
 
@@ -16,6 +17,7 @@ class GatewayService {
     this.logger = logger;
     this.turnContexts = new Map();
     this.sessionQueues = new Map();
+    this.messageDeduper = new MessageDeduper({ ttlMs: config.feishuDedupTtlMs });
   }
 
   async handleFeishuEvent(payload) {
@@ -33,6 +35,13 @@ class GatewayService {
     );
     if (!inbound.messageId || !inbound.chatId || !inbound.openId) {
       return { ignored: true, reason: 'missing_identity' };
+    }
+    if (this.messageDeduper.isDuplicate(inbound.messageId)) {
+      this.logger.log(
+        '[gateway] duplicate feishu event ignored',
+        JSON.stringify({ message_id: inbound.messageId, chat_id: inbound.chatId, open_id: inbound.openId }),
+      );
+      return { ignored: true, reason: 'duplicate_message' };
     }
 
     const pairToken = parsePairCommand(inbound.text);

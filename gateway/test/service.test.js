@@ -149,6 +149,27 @@ test('pair command updates pair store', async () => {
   assert.equal(calls.replies.length, 1);
 });
 
+test('duplicate inbound message is ignored after first handling', async () => {
+  const { service, calls } = makeService();
+  const payload = {
+    sender: { sender_id: { open_id: 'ou_allow' } },
+    message: {
+      message_id: 'om_dup_1',
+      chat_id: 'oc_dup_1',
+      chat_type: 'p2p',
+      content: JSON.stringify({ text: 'hello once' }),
+    },
+  };
+
+  const first = await service.handleFeishuEvent(payload);
+  const second = await service.handleFeishuEvent(payload);
+
+  assert.equal(first.accepted, true);
+  assert.deepEqual(second, { ignored: true, reason: 'duplicate_message' });
+  assert.equal(calls.submits.length, 1);
+  assert.equal(calls.reactions.length, 1);
+});
+
 test('progress slot sends a new plain text message for each intermediate update', async () => {
   const { service, calls } = makeService();
   await service.handleFeishuEvent({

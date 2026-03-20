@@ -29,6 +29,11 @@ test('loadConfig disables idle restart by default and accepts explicit zero', ()
   assert.equal(loadConfig({ FEISHU_WS_IDLE_RESTART_MS: '0' }).feishuWsIdleRestartMs, 0);
 });
 
+test('loadConfig uses default feishu dedup ttl and accepts explicit zero', () => {
+  assert.equal(loadConfig({}).feishuDedupTtlMs, 10 * 60 * 1000);
+  assert.equal(loadConfig({ FEISHU_DEDUP_TTL_MS: '0' }).feishuDedupTtlMs, 0);
+});
+
 test('shouldRestartIdleWsClient returns false before idle timeout', () => {
   assert.equal(shouldRestartIdleWsClient(800, 1000, 300), false);
 });

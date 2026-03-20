@@ -31,6 +31,7 @@ OtterLink connects Feishu conversations to local agent runtimes such as `codex` 
 - Linux `systemd` and macOS `launchd` deployment
 - Shared card/text rendering with graceful fallback on Feishu update failures
 - Runtime-level proxy control with per-agent defaults
+- Inbound Feishu `message_id` deduplication to avoid duplicate turn submission
 
 ## Architecture
 

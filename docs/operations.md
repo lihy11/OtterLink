@@ -174,6 +174,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
    检查飞书机器人事件订阅和 `im.message.receive_v1` 权限。
    若 `.run/gateway.log` 出现 `getaddrinfo EAI_AGAIN open.feishu.cn` 且后续没有新的 inbound event，说明长连接重连失败；当前 gateway 会在重连计划超时后自动重建 WS client。
    `FEISHU_WS_IDLE_RESTART_MS` 默认关闭。空闲本身不是故障，不能把“没有新的 `ws raw event`”当成长连接失效的直接证据；否则会把正常空闲连接误判为故障并反复重建。
+   当前 gateway 会按 `message_id` 做进程内去重；如果同一条飞书事件被重推，日志里会出现 `duplicate feishu event ignored`。
    若飞书聊天里看到某条 `/ot ...` 没有生效，先按下面顺序检查：
    - 有 `ws raw event`：说明飞书 SDK 已经收到事件
    - 有 `inbound feishu event`：说明 gateway 业务入口已收到事件
