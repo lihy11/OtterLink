@@ -433,7 +433,9 @@ async fn start_turn(
                 "cwd": workspace_path,
                 "model": config.codex_model,
                 "approvalPolicy": "never",
-                "sandboxPolicy": "danger-full-access",
+                "sandboxPolicy": {
+                    "type": "dangerFullAccess"
+                },
                 "personality": "pragmatic",
                 "input": [
                     {

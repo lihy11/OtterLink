@@ -1860,6 +1860,7 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use tokio::sync::{mpsc, Mutex};
+    use tokio::time::{sleep, Instant};
     use tokio::time::Duration;
 
     use super::*;
@@ -2792,6 +2793,252 @@ mod tests {
             Some("codex-history-missing")
         );
         assert!(switched.history_overview.is_none());
+    }
+
+    async fn wait_until<F, Fut>(timeout: Duration, mut condition: F) -> Result<()>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if condition().await {
+                return Ok(());
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+        anyhow::bail!("condition not satisfied before timeout");
+    }
+
+    #[tokio::test]
+    #[ignore = "live codex app-server core control probe"]
+    async fn live_codex_core_control_commands_roundtrip() {
+        let workspace = std::env::current_dir().unwrap();
+        let config = Arc::new(Config {
+            runtime_mode: "codex_app_server".to_string(),
+            codex_workdir: workspace.clone(),
+            claude_home_dir: PathBuf::from(std::env::var("HOME").unwrap()).join(".claude"),
+            codex_home_dir: PathBuf::from(std::env::var("HOME").unwrap()).join(".codex"),
+            state_db_path: PathBuf::from(format!(
+                "/tmp/otterlink-live-core-{}.db",
+                uuid::Uuid::new_v4()
+            )),
+            todo_event_log_path: PathBuf::from(format!(
+                "/tmp/otterlink-live-core-{}.jsonl",
+                uuid::Uuid::new_v4()
+            )),
+            core_bind: "127.0.0.1:39041".parse().unwrap(),
+            core_ingest_token: None,
+            gateway_event_url: "http://127.0.0.1:39040/internal/gateway/event".to_string(),
+            gateway_event_token: None,
+            acp_proxy_url: Some("http://127.0.0.1:7890".to_string()),
+            claude_code_default_proxy_mode: "off".to_string(),
+            codex_default_proxy_mode: "on".to_string(),
+            codex_bin: "codex".to_string(),
+            codex_model: None,
+            codex_skip_git_repo_check: true,
+            acp_adapter: "codex".to_string(),
+            acp_agent_cmd: None,
+            render_min_update_ms: 0,
+        });
+
+        let runtime = crate::agent::runtime::build_runtime(config.clone());
+        let sink = Arc::new(MockSink::default());
+        let service = build_service_with_config(runtime, sink, config).await;
+        let session_key = "control:live-codex";
+        let workspace_str = workspace.to_string_lossy().to_string();
+
+        let use_agent = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::UseAgent,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(use_agent.ok);
+
+        let show_before = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::ShowRuntime,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(show_before.message.contains("当前已选定 agent 与 workspace"));
+
+        let cwd = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::SetWorkspace,
+                runtime_selector: None,
+                workspace_path: Some(workspace_str.clone()),
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(cwd.ok);
+        assert_eq!(
+            cwd.selector.as_ref().map(|item| item.workspace_path.as_str()),
+            Some(workspace_str.as_str())
+        );
+
+        let created = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::CreateRuntime,
+                runtime_selector: None,
+                workspace_path: Some(workspace_str.clone()),
+                label: Some("codex-live-core".to_string()),
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            created.active_runtime.as_ref().map(|item| item.label.as_str()),
+            Some("codex-live-core")
+        );
+
+        let first_turn = service
+            .handle_inbound(crate::core::inbound::CoreInboundRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                text: "请只回复 OK。".to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(first_turn.turn_id.is_some());
+
+        wait_until(Duration::from_secs(60), || async {
+            let selector = service
+                .ensure_runtime_selection(
+                    &service.registry.resolve(session_key, None).await.unwrap(),
+                )
+                .await
+                .unwrap();
+            service
+                .selected_runtime(&selector)
+                .await
+                .unwrap()
+                .and_then(|runtime| runtime.runtime_session_ref)
+                .is_some()
+        })
+        .await
+        .unwrap();
+
+        wait_until(Duration::from_secs(60), || async {
+            service.active_turns.get(session_key).await.is_none()
+        })
+        .await
+        .unwrap();
+
+        let listed = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::ListRuntimes,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(!listed.runtimes.is_empty());
+
+        let loaded = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::LoadRuntimes,
+                runtime_selector: None,
+                workspace_path: Some(workspace_str.clone()),
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(loaded.ok);
+        assert!(!loaded.runtimes.is_empty());
+
+        let picked_ref = loaded
+            .runtimes
+            .iter()
+            .find_map(|runtime| runtime.runtime_session_ref.clone())
+            .expect("expected codex runtime_session_ref after load");
+        let picked = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::SwitchRuntime,
+                runtime_selector: Some(picked_ref.clone()),
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(picked.ok);
+        assert_eq!(
+            picked
+                .active_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.runtime_session_ref.as_deref()),
+            Some(picked_ref.as_str())
+        );
+
+        let second_turn = service
+            .handle_inbound(crate::core::inbound::CoreInboundRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                text: "请先执行 shell 命令 `sleep 20`，然后只回复 DONE。".to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(second_turn.turn_id.is_some());
+
+        let stopped = service
+            .handle_control(CoreControlRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                action: ControlAction::StopRuntime,
+                runtime_selector: None,
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        assert!(stopped.ok);
+        assert!(stopped.message.contains("已请求停止当前任务"));
     }
 
     #[tokio::test]
