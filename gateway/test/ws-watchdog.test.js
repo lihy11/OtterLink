@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const { loadConfig } = require('../src/config');
 const { shouldRestartWsClient, shouldRestartIdleWsClient } = require('../src/feishu/ws-watchdog');
 
 test('shouldRestartWsClient returns false without reconnect schedule', () => {
@@ -21,6 +22,11 @@ test('shouldRestartWsClient returns false after a later successful connection', 
 
 test('shouldRestartIdleWsClient returns false for missing timestamp', () => {
   assert.equal(shouldRestartIdleWsClient(0, 1000, 300), false);
+});
+
+test('loadConfig disables idle restart by default and accepts explicit zero', () => {
+  assert.equal(loadConfig({}).feishuWsIdleRestartMs, 0);
+  assert.equal(loadConfig({ FEISHU_WS_IDLE_RESTART_MS: '0' }).feishuWsIdleRestartMs, 0);
 });
 
 test('shouldRestartIdleWsClient returns false before idle timeout', () => {

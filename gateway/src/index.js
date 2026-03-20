@@ -148,7 +148,10 @@ async function main() {
         );
         return;
       }
-      if (!shouldRestartIdleWsClient(lastWsEventAt, now, config.feishuWsIdleRestartMs)) {
+      if (
+        config.feishuWsIdleRestartMs <= 0 ||
+        !shouldRestartIdleWsClient(lastWsEventAt, now, config.feishuWsIdleRestartMs)
+      ) {
         return;
       }
       restartWsClient(

@@ -26,7 +26,7 @@ function loadConfig(env = process.env) {
     disableWs: matchesTrue(env.FEISHU_DISABLE_WS),
     feishuWsWatchdogIntervalMs: parsePositiveInt(env.FEISHU_WS_WATCHDOG_INTERVAL_MS, 15000),
     feishuWsStallTimeoutMs: parsePositiveInt(env.FEISHU_WS_STALL_TIMEOUT_MS, 120000),
-    feishuWsIdleRestartMs: parsePositiveInt(env.FEISHU_WS_IDLE_RESTART_MS, 60000),
+    feishuWsIdleRestartMs: parseNonNegativeInt(env.FEISHU_WS_IDLE_RESTART_MS, 0),
   };
 }
 
@@ -37,6 +37,11 @@ function matchesTrue(value) {
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 module.exports = {
