@@ -381,17 +381,7 @@ async fn start_turn(
         .unwrap_or_else(|| config.codex_workdir.clone());
     let thread_id = if let Some(runtime_session_ref) = request.runtime_session_ref.as_ref() {
         let response = conn
-            .request(
-                "thread/resume",
-                json!({
-                    "threadId": runtime_session_ref,
-                    "cwd": workspace_path,
-                    "model": config.codex_model,
-                    "approvalPolicy": "never",
-                    "sandbox": "danger-full-access",
-                    "personality": "pragmatic",
-                }),
-            )
+            .request("thread/resume", build_thread_resume_params(runtime_session_ref, &workspace_path, config))
             .await?;
         response
             .get("thread")
@@ -401,16 +391,7 @@ async fn start_turn(
             .ok_or_else(|| anyhow!("codex app-server thread/resume response missing thread.id"))?
     } else {
         let response = conn
-            .request(
-                "thread/start",
-                json!({
-                    "cwd": workspace_path,
-                    "model": config.codex_model,
-                    "approvalPolicy": "never",
-                    "sandbox": "danger-full-access",
-                    "personality": "pragmatic",
-                }),
-            )
+            .request("thread/start", build_thread_start_params(&workspace_path, config))
             .await?;
         response
             .get("thread")
@@ -426,25 +407,7 @@ async fn start_turn(
     let _ = events_tx.send(RuntimeEvent::Agent(NormalizedAgentEvent::TurnStarted));
 
     let response = conn
-        .request(
-            "turn/start",
-            json!({
-                "threadId": thread_id,
-                "cwd": workspace_path,
-                "model": config.codex_model,
-                "approvalPolicy": "never",
-                "sandboxPolicy": {
-                    "type": "dangerFullAccess"
-                },
-                "personality": "pragmatic",
-                "input": [
-                    {
-                        "type": "text",
-                        "text": request.prompt,
-                    }
-                ]
-            }),
-        )
+        .request("turn/start", build_turn_start_params(&thread_id, &workspace_path, &request.prompt, config))
         .await?;
     let runtime_turn_ref = response
         .get("turn")
@@ -475,6 +438,55 @@ async fn steer_turn(conn: &RpcConnection, request: &RuntimeSteerRequest) -> Resu
     )
     .await?;
     Ok(())
+}
+
+fn build_thread_start_params(workspace_path: &std::path::Path, config: &Config) -> Value {
+    json!({
+        "cwd": workspace_path,
+        "model": config.codex_model,
+        "approvalPolicy": "never",
+        "sandbox": "danger-full-access",
+        "personality": "pragmatic",
+    })
+}
+
+fn build_thread_resume_params(
+    runtime_session_ref: &str,
+    workspace_path: &std::path::Path,
+    config: &Config,
+) -> Value {
+    json!({
+        "threadId": runtime_session_ref,
+        "cwd": workspace_path,
+        "model": config.codex_model,
+        "approvalPolicy": "never",
+        "sandbox": "danger-full-access",
+        "personality": "pragmatic",
+    })
+}
+
+fn build_turn_start_params(
+    thread_id: &str,
+    workspace_path: &std::path::Path,
+    prompt: &str,
+    config: &Config,
+) -> Value {
+    json!({
+        "threadId": thread_id,
+        "cwd": workspace_path,
+        "model": config.codex_model,
+        "approvalPolicy": "never",
+        "sandboxPolicy": {
+            "type": "dangerFullAccess"
+        },
+        "personality": "pragmatic",
+        "input": [
+            {
+                "type": "text",
+                "text": prompt,
+            }
+        ]
+    })
 }
 
 async fn list_threads(
@@ -974,9 +986,15 @@ async fn shutdown_process(child: &mut Child, stderr_task: &mut JoinHandle<()>) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
-    use super::parse_thread_history_from_read_response;
+    use std::path::PathBuf;
+
+    use super::{
+        build_thread_resume_params, build_thread_start_params, build_turn_start_params,
+        parse_thread_history_from_read_response,
+    };
+    use crate::config::Config;
 
     #[test]
     fn parse_thread_history_maps_user_and_agent_messages() {
@@ -1027,5 +1045,48 @@ mod tests {
         assert_eq!(parsed[0].assistant_text, "我先列一下当前目录。\n接着我会总结关键模块。");
         assert_eq!(parsed[1].user_text, "继续");
         assert_eq!(parsed[1].assistant_text, "");
+    }
+
+    #[test]
+    fn codex_app_server_params_disable_approvals_and_use_danger_full_access() {
+        let config = Config {
+            core_bind: "127.0.0.1:39001".parse().unwrap(),
+            core_ingest_token: None,
+            gateway_event_url: "http://127.0.0.1:39000/internal/gateway/event".to_string(),
+            gateway_event_token: None,
+            state_db_path: PathBuf::from("/tmp/otterlink-codex-app-server-test.db"),
+            claude_home_dir: PathBuf::from("/tmp/claude-home"),
+            codex_home_dir: PathBuf::from("/tmp/codex-home"),
+            acp_proxy_url: None,
+            claude_code_default_proxy_mode: "off".to_string(),
+            codex_default_proxy_mode: "on".to_string(),
+            codex_bin: "codex".to_string(),
+            codex_workdir: PathBuf::from("/tmp/workspace"),
+            codex_model: Some("gpt-5.4".to_string()),
+            codex_skip_git_repo_check: true,
+            runtime_mode: "codex_app_server".to_string(),
+            acp_adapter: "codex".to_string(),
+            acp_agent_cmd: None,
+            render_min_update_ms: 0,
+            todo_event_log_path: PathBuf::from("/tmp/otterlink-codex-app-server-test.jsonl"),
+        };
+
+        let thread_start = build_thread_start_params(&config.codex_workdir, &config);
+        assert_eq!(thread_start.get("approvalPolicy").and_then(Value::as_str), Some("never"));
+        assert_eq!(thread_start.get("sandbox").and_then(Value::as_str), Some("danger-full-access"));
+
+        let thread_resume = build_thread_resume_params("thread_1", &config.codex_workdir, &config);
+        assert_eq!(thread_resume.get("approvalPolicy").and_then(Value::as_str), Some("never"));
+        assert_eq!(thread_resume.get("sandbox").and_then(Value::as_str), Some("danger-full-access"));
+
+        let turn_start = build_turn_start_params("thread_1", &config.codex_workdir, "hello", &config);
+        assert_eq!(turn_start.get("approvalPolicy").and_then(Value::as_str), Some("never"));
+        assert_eq!(
+            turn_start
+                .get("sandboxPolicy")
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str),
+            Some("dangerFullAccess")
+        );
     }
 }

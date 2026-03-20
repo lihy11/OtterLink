@@ -164,6 +164,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 7. 如果 stop 之后 agent 还在请求权限，bridge 会直接返回 `Cancelled`，不会继续放行工具调用。
 8. 如果 `codex` 需要联网但 app-server 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
 9. 如果 `codex` 运行中发送普通文本消息后返回“已将补充消息发送给当前 Codex 任务”，这是预期行为：Rust 已把该消息转成 app-server `turn/steer`，不会新建下一轮队列 turn。
+10. 当前 `codex app-server` 运行策略固定为 `approvalPolicy=never` 且 `danger full access`；如果仍看到审批相关报错，应优先怀疑协议参数漂移或上游 CLI 版本变化，而不是当前配置未开启自动执行。
 
 ## 排障
 
