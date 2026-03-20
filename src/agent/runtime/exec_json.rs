@@ -65,6 +65,7 @@ impl AgentRuntime for ExecJsonRuntime {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let (cancel, mut cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
         let config = self.config.clone();
+        let runtime_session_ref = request.runtime_session_ref.clone();
         let completion = tokio::spawn(async move {
             let workspace_path = request
                 .workspace_path
@@ -164,6 +165,8 @@ impl AgentRuntime for ExecJsonRuntime {
             events: events_rx,
             completion,
             cancel,
+            runtime_session_ref,
+            runtime_turn_ref: None,
         })
     }
 

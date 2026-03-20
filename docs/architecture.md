@@ -42,7 +42,7 @@
 位置：`src/agent/`
 
 职责：
-1. 封装 ACP 和 `codex exec --json`。
+1. 封装 `claude_code` ACP 和 `codex app-server`。
 2. 标准化不同 agent 的事件流。
 3. 对 core 暴露统一 `AgentRuntime` trait。
 
@@ -74,13 +74,30 @@ flowchart LR
 2. gateway 完成 auth / pairing / session routing。
 3. gateway 将认证成功后的所有文本消息统一转发到 `POST /internal/core/inbound`。
 4. Rust core resolve session、runtime binding、持久化状态。
-5. 如果是 `load_runtimes`，core 会优先按当前 agent 调用 ACP `session/list`；agent 不支持时才回退本地目录或 sqlite 导入历史 session。
+5. 如果是 `load_runtimes`，core 会优先按当前 agent 调用 runtime 自带的会话列举能力；当前 `claude_code` 走 ACP `session/list`，`codex` 优先走 app-server `thread/list`，必要时再回退本地 sqlite。
 6. `/ot stop` 这类控制命令会由 core 直接取消当前 turn，不经过普通 prompt 执行。
 7. 普通 turn 启动 runtime，并持续输出统一事件。
 8. core 生成 `progress` / `todo` / `final` 标准消息。
 9. core 回调 gateway 的 `/internal/gateway/event`。
 10. gateway 利用飞书卡片和 reply/update 能力完成展示。
 11. 本地运维通过 `otterlink` CLI 修改 env、检测 ACP、并调用启动脚本管理 core/gateway。
+
+## Codex Runtime Status
+
+当前 `codex` 默认走本地 `codex app-server`，已接入的能力：
+
+1. `thread/start` / `thread/resume`
+2. `thread/list` / `thread/read`
+3. `turn/start`
+4. `turn/interrupt`
+5. `turn/steer`
+6. 基础消息流、计划更新、命令执行状态
+
+当前刻意留待后续补齐的能力：
+
+1. 更完整的 item/file/diff/reasoning 事件映射
+2. 更细粒度的 approval / user-input 交互
+3. 更完整的 thread metadata / archived 管理 / pagination 控制
 
 ## 边界原则
 

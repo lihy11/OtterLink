@@ -171,6 +171,7 @@ impl AcpRuntime {
 #[async_trait]
 impl AgentRuntime for AcpRuntime {
     async fn start_turn(&self, request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
+        let runtime_session_ref = request.runtime_session_ref.clone();
         let worker = self.worker_for_turn(&request).await?;
         let (cancel, cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
         let (events_tx, events_rx) = mpsc::unbounded_channel();
@@ -195,6 +196,8 @@ impl AgentRuntime for AcpRuntime {
             events: events_rx,
             completion,
             cancel,
+            runtime_session_ref,
+            runtime_turn_ref: None,
         })
     }
 

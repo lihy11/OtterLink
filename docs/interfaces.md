@@ -230,17 +230,19 @@ Gateway 当前支持：
 `/ot use <claude|codex>` 只切换当前 agent，并自动加载当前 `cwd` 下的候选会话。
 `/ot pick` 才会显式选定会话。
 `/ot pick` 成功后，如果 ACP `session/load` 提供了历史回放，gateway 会额外发送一张 `历史概览` 卡片，显示裁剪后的最近 5 轮 `- user / - assistant` 对话。
-`/ot stop` 会停止当前正在运行的 turn；ACP 会先发送 `session/cancel` 并等待 `cancelled` 收尾，超时后才强制中断；`exec_json` 直接终止本地进程。
+`/ot stop` 会停止当前正在运行的 turn；`claude_code` ACP 会先发送 `session/cancel` 并等待 `cancelled` 收尾，`codex` app-server 会发送 `turn/interrupt`，`exec_json` 直接终止本地进程。
 `/ot proxy` 会更新当前选择器的代理策略，影响后续 ACP/exec 启动时注入的 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY`。
-`/ot load` 会优先按当前 agent 调用 ACP `session/list`：
+`/ot load` 会优先按当前 agent 调用 runtime 的会话列举能力：
 
-- `claude_code`: 不支持 `session/list` 时，回退到 `CLAUDE_HOME_DIR/projects/<workspace-key>/`
-- `codex`: 不支持 `session/list` 时，回退到 `CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表按 `cwd` 过滤
+- `claude_code`: 优先走 ACP `session/list`；不支持时回退到 `CLAUDE_HOME_DIR/projects/<workspace-key>/`
+- `codex`: 当前优先使用 app-server `thread/list` 按 `cwd` 列举 threads；若运行时不支持，再回退 `CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表
 
 ACP 真正恢复历史时会调用 `session/load`。如果 agent 没有声明 `loadSession` 能力，core 会直接报错，不会静默创建新会话。
 取消时，ACP client 会先发 `session/cancel`，随后对任何新的 `session/request_permission` 返回 `Cancelled`。
-ACP 单轮是否结束，以 `session/prompt` 的 `PromptResponse.stop_reason` 为准。`codex-acp` 的正常收尾是 `end_turn`；`cancelled / max_tokens / max_turn_requests / refusal` 也都会被记录到 runtime completion。
-ACP worker 使用持久连接，`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程。
+`claude_code` 单轮是否结束，以 ACP `session/prompt` 的 `PromptResponse.stop_reason` 为准。`codex` 单轮是否结束，以 app-server `turn/completed` 为准。
+当 `codex` 已有活跃 turn 时，新的普通文本消息不会再在 Rust 队列里阻塞成下一轮；Rust 会把它转成 app-server `turn/steer` 发送给当前 turn，由 Codex 自己决定何时吸收。
+`/ot pick` 的最近历史概览优先通过 app-server `thread/read(includeTurns=true)` 获取；如果该步骤失败，不会阻断选中动作。
+ACP worker 使用持久连接，`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程；Codex app-server worker 也按聊天 session 常驻复用。
 
 `/ot help`、拼错的 `/ot` 子命令和缺参数情况，都由 Rust 在 `/internal/core/inbound` 里直接返回即时回复，不进入普通 agent turn。
 优先使用 `sessions-index.json`；如果索引不存在，会回退扫描 `*.jsonl` 头部元数据。
