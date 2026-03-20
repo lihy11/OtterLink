@@ -26,13 +26,15 @@ OtterLink connects Feishu conversations to local agent runtimes such as `codex` 
 
 - Feishu bot ingress with pairing or allow-list auth modes
 - Rust core for session state, turn orchestration, and runtime isolation
-- ACP and `exec_json` runtime support
+- Claude ACP runtime and Codex app-server runtime support
 - In-chat control commands via `/ot ...`
 - Local CLI via `otterlink ...`
 - Linux `systemd` and macOS `launchd` deployment
 - Shared card/text rendering with graceful fallback on Feishu update failures
 - Runtime-level proxy control with per-agent defaults
 - Inbound Feishu `message_id` deduplication to avoid duplicate turn submission
+- Active Codex turns accept additional plain-text guidance via app-server `turn/steer`
+- Codex `/ot list` / `/ot load` / `/ot pick` prefer app-server `thread/list` and `thread/read`, with local sqlite only as a fallback discovery source
 
 ## Architecture
 
@@ -205,7 +207,8 @@ Important environment variables:
 - `GATEWAY_EVENT_TOKEN`: protects `core -> gateway`
 - `FEISHU_AUTH_MODE`: `off | pair | allow_from | pair_or_allow_from`
 - `ALLOW_FROM_OPEN_IDS`, `PAIR_AUTH_TOKEN`, `PAIR_STORE_PATH`
-- `RUNTIME_MODE`: `acp | exec_json | acp_fallback`
+- `RUNTIME_MODE`: `acp | exec_json | codex_app_server | hybrid`
+  - `acp_fallback` 兼容值当前会映射到 `hybrid`
 - `ACP_ADAPTER`: default agent kind
 - `ACP_PROXY_URL`: default proxy URL
 - `CLAUDE_CODE_DEFAULT_PROXY_MODE`

@@ -94,7 +94,8 @@ core 进程内还维护：
 
 `/ot load [workspace]` 会按当前 agent 导入历史 session：
 
-- 首选：ACP `session/list`
+- `claude_code`：首选 ACP `session/list`
+- `codex`：当前历史 thread 优先通过 app-server `thread/list` / `thread/read` 导入
 - `claude_code` 回退：`CLAUDE_HOME_DIR/projects/<workspace-key>/`
 - `codex` 回退：`CODEX_HOME_DIR/state_5.sqlite` 的 `threads` 表
 

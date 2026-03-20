@@ -70,8 +70,8 @@
 
 1. 默认读取当前 active runtime 的 workspace。
 2. 可显式指定其他 workspace。
-3. 优先调用 ACP `session/list` 按当前 `agent + cwd` 列出候选会话。
-4. 如果 agent 不支持 `session/list`，`claude_code` 才回退读取 `sessions-index.json` / `*.jsonl`，`codex` 才回退读取 `CODEX_HOME_DIR/state_5.sqlite`。
+3. 优先调用 runtime 自带的会话列举能力按当前 `agent + cwd` 列出候选会话。
+4. 当前 `claude_code` 走 ACP `session/list`；`codex` 优先走 app-server `thread/list`，不可用时再回退读取 `CODEX_HOME_DIR/state_5.sqlite`。
 5. 对 ACP runtime，真正恢复历史必须调用 `session/load`；如果 agent 不支持 `loadSession`，直接报错，不回退到 `session/new`。
 6. 为兼容 macOS，`/tmp` 和 `/private/tmp` 两种目录键都会尝试。
 
@@ -83,10 +83,12 @@
 4. 代理地址优先取命令里显式传入，其次取 `ACP_PROXY_URL`，再回退现有代理环境变量。
 5. `/ot stop` 对 ACP runtime 会先发送协议 `session/cancel`，等待 prompt 以 `cancelled` 收尾；如果 agent 在宽限时间内没有结束，再做强制中断。
 6. 取消后如果 agent 仍发来 `session/request_permission`，bridge 会按协议返回 `Cancelled`，不再继续授权。
-7. 单轮真正的结束标识以 ACP `session/prompt` 的 `PromptResponse.stop_reason` 为准；对 `codex-acp`，正常结束是 `end_turn`，不是某个单独的 `SessionUpdate`。
+7. `claude_code` 单轮真正的结束标识仍以 ACP `session/prompt` 的 `PromptResponse.stop_reason` 为准。
+8. `codex` 单轮结束以 app-server `turn/completed` 为准；活跃 turn 期间新的普通文本消息会被转成 `turn/steer`，不再排队成新的 turn。
 8. ACP worker 采用持久连接；`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程。
 9. `session/load` 期间由 agent 回放的历史 `session/update` 只用于恢复 session 状态，不能被当作当前 turn 的新输出。
-10. 历史回放会被裁剪为最近 5 轮 `user / assistant` 摘要；每条只取首行并截断，避免历史概览卡片过长。
+10. `codex` 的历史概览优先来自 app-server `thread/read(includeTurns=true)`；如果概览加载失败，`/ot pick` 仍然成功，只是不展示概览卡片。
+11. 历史回放会被裁剪为最近 5 轮 `user / assistant` 摘要；每条只取首行并截断，避免历史概览卡片过长。
 
 控制卡片规则：
 

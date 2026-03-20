@@ -20,8 +20,9 @@
 0. 飞书 gateway 只负责认证和转发；是否为 `/ot` 控制命令、是否进入 ACP turn，统一在 Rust core 决定。
 1. ACP worker 按 `agent + cwd + proxy` 维度持久化，避免每轮重启 agent 进程。
 2. 单个 worker 当前按顺序处理命令，保证同一 ACP 连接内的 `session/update` 与 `session/prompt` 收尾语义清晰。
-3. `codex-acp` 的正常收尾以 `end_turn` 为准，不依赖某个单独的 update 事件。
-4. `codex` 默认 launcher 不依赖 optional dependency 自动安装，而是显式拉起 `@zed-industries/codex-acp@0.9.2` 与 `@zed-industries/codex-acp-linux-x64@0.9.2`。
+3. `claude_code` 仍通过 ACP 运行；`codex` 默认生产路径已切到本地 `codex app-server`，不再依赖 `codex-acp`。
+4. `codex` 运行中的补充文本消息通过 app-server `turn/steer` 注入当前活跃 turn。
+5. `codex` 的 `/ot list` / `/ot pick` 历史概览优先通过 app-server `thread/list` / `thread/read` 提供。
 5. `session/load` 期间 agent 可能会按协议回放历史 `session/update`；这些回放只用于恢复状态，不能被当作当前 turn 的新输出。
 6. 当前实现会把 `session/load` 的历史回放缓存成最近对话摘要；当用户执行 `/ot pick` 选中已有 session 时，gateway 会额外发送一张 `历史概览` 卡片，显示裁剪后的最近 5 轮 `user / assistant` 对话。
 7. `session/list` 是当前 runtime/session 导入的首选路径；本地 sqlite/jsonl 发现只作为不支持该能力时的兼容回退。

@@ -128,13 +128,14 @@ otterlink status
 
 说明：
 
-1. `/ot load` 会优先调用 ACP `session/list` 按当前 `agent + cwd` 列出会话。
-2. 只有 agent 不支持 `session/list` 时，`claude_code` 才回退到 `CLAUDE_HOME_DIR/projects/...`，`codex` 才回退到 `CODEX_HOME_DIR/state_5.sqlite`。
+1. `/ot load` 会优先调用当前 runtime 的会话列举能力。
+2. 当前 `claude_code` 优先使用 ACP `session/list`，`codex` 优先使用 app-server `thread/list` / `thread/read`，本地 sqlite 仅作为回退发现来源。
 3. `list/show/load` 的飞书返回会渲染为 Markdown 表格，表头摘要只显示当前 `Agent` 和 `CWD`。
 4. `/ot pick` 如果命中已有 session，除了控制结果表格外，还会额外回一张 `历史概览` 卡片，展示裁剪后的最近 5 轮 `user / assistant` 对话。
-5. `/ot stop` 会停止当前正在运行的 turn；ACP 会发 `session/cancel`，`exec_json` 会终止本地进程。
-6. `/ot proxy` 会控制后续 ACP/exec 启动时是否注入代理环境变量。
-7. 在当前实现里，gateway 只做认证和转发；`/ot` 的解析与错误提示由 Rust core 返回。
+5. `/ot stop` 会停止当前正在运行的 turn；`claude_code` ACP 会发 `session/cancel`，`codex app-server` 会发 `turn/interrupt`，`exec_json` 会终止本地进程。
+6. `codex` 正在执行时，再发送普通文本消息不会在 Rust 里排队阻塞；该消息会被转成 app-server `turn/steer`。
+7. `/ot proxy` 会控制后续 runtime 启动时是否注入代理环境变量。
+8. 在当前实现里，gateway 只做认证和转发；`/ot` 的解析与错误提示由 Rust core 返回。
 
 ## 控制台配置覆盖项
 

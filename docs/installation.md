@@ -38,7 +38,7 @@ tar
 需要提前准备：
 
 - 飞书应用 `APP_ID` / `APP_SECRET`
-- 本机可执行的 `claude` / `codex` / ACP agent
+- 本机可执行的 `claude` / `codex`
 - 真实 `~/.claude`，如果要导入 Claude 历史 session
 
 ## 一键安装
@@ -54,7 +54,7 @@ tar
 1. 编译 Rust release binary
 2. 安装 gateway 的 npm 依赖
 3. 安装 `otterlink` 控制台命令到 `~/.local/bin/otterlink`
-4. 扫描并预装缺失的 `claude_code` / `codex` ACP runtime
+4. 扫描并预装缺失的 `claude_code` ACP runtime；`codex` 默认直接使用本地 CLI 的 `app-server`
 5. 如果当前机器缺少 Rust 或 Node，则自动安装 Rust `1.94.0` 与 Node `22.22.1`
 6. 在交互式终端中可继续进入 `otterlink configure` 和 `otterlink start`
 
@@ -84,7 +84,7 @@ sudo chown -R "$USER":"$(id -gn)" /etc/otterlink /var/lib/otterlink
 
 若先走本地 CLI 配置，也可以直接把 `.run/feishu.env` 的内容整理后迁移到 `/etc/otterlink/otterlink.env`。
 
-如果你需要在飞书里对 `codex` 执行 `/ot load`，记得把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`。
+如果你需要在飞书里对 `codex` 执行 `/ot load`，优先依赖本机 `codex app-server` 的 `thread/list`；同时仍建议把 `CODEX_HOME_DIR` 指向线上机器真实的 `~/.codex`，作为历史发现回退来源。
 
 ## 安装 systemd 单元
 

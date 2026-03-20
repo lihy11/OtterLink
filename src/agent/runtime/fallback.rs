@@ -54,6 +54,8 @@ impl AgentRuntime for FallbackRuntime {
             events: events_rx,
             completion,
             cancel,
+            runtime_session_ref: None,
+            runtime_turn_ref: None,
         })
     }
 
@@ -144,7 +146,13 @@ mod tests {
                     Ok(RuntimeCompletion::default())
                 }
             });
-            Ok(RuntimeTurn { events: rx, completion, cancel })
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
         }
 
         fn name(&self) -> &'static str {
@@ -171,6 +179,7 @@ mod tests {
 
         let turn = runtime
             .start_turn(RuntimeTurnRequest {
+                session_key: "fallback:codex".to_string(),
                 prompt: "hello".to_string(),
                 runtime_session_ref: None,
                 agent_kind: Some("codex".to_string()),
@@ -206,6 +215,7 @@ mod tests {
 
         let turn = runtime
             .start_turn(RuntimeTurnRequest {
+                session_key: "fallback:claude".to_string(),
                 prompt: "hello".to_string(),
                 runtime_session_ref: None,
                 agent_kind: Some("claude_code".to_string()),
@@ -243,6 +253,7 @@ mod tests {
 
         let turn = runtime
             .start_turn(RuntimeTurnRequest {
+                session_key: "fallback:codex2".to_string(),
                 prompt: "hello".to_string(),
                 runtime_session_ref: None,
                 agent_kind: Some("codex".to_string()),

@@ -22,8 +22,21 @@ pub fn is_list_sessions_unsupported_error(err: &anyhow::Error) -> bool {
 
 #[derive(Clone)]
 pub struct RuntimeTurnRequest {
+    pub session_key: String,
     pub prompt: String,
     pub runtime_session_ref: Option<String>,
+    pub agent_kind: Option<String>,
+    pub workspace_path: Option<PathBuf>,
+    pub proxy_mode: Option<String>,
+    pub proxy_url: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct RuntimeSteerRequest {
+    pub session_key: String,
+    pub prompt: String,
+    pub runtime_session_ref: String,
+    pub runtime_turn_ref: String,
     pub agent_kind: Option<String>,
     pub workspace_path: Option<PathBuf>,
     pub proxy_mode: Option<String>,
@@ -93,11 +106,16 @@ pub struct RuntimeTurn {
     pub events: mpsc::UnboundedReceiver<RuntimeEvent>,
     pub completion: JoinHandle<Result<RuntimeCompletion>>,
     pub cancel: RuntimeCancelHandle,
+    pub runtime_session_ref: Option<String>,
+    pub runtime_turn_ref: Option<String>,
 }
 
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     async fn start_turn(&self, request: RuntimeTurnRequest) -> Result<RuntimeTurn>;
+    async fn steer_turn(&self, _request: RuntimeSteerRequest) -> Result<()> {
+        Err(anyhow!("runtime steer unsupported"))
+    }
     async fn list_sessions(&self, _query: RuntimeSessionQuery) -> Result<Vec<RuntimeSessionListing>> {
         Err(anyhow!(LIST_SESSIONS_UNSUPPORTED_ERROR_TEXT))
     }
@@ -114,6 +132,8 @@ pub fn build_runtime(config: Arc<Config>) -> Arc<dyn AgentRuntime> {
     match config.runtime_mode.as_str() {
         "exec_json" => Arc::new(super::exec_json::ExecJsonRuntime::new(config)),
         "acp" => Arc::new(super::acp::AcpRuntime::new(config)),
+        "codex_app_server" => Arc::new(super::codex_app_server::CodexAppServerRuntime::new(config)),
+        "hybrid" | "acp_fallback" => Arc::new(super::router::RouterRuntime::new(config)),
         _ => Arc::new(super::fallback::FallbackRuntime::new(
             Arc::new(super::acp::AcpRuntime::new(config.clone())),
             Arc::new(super::exec_json::ExecJsonRuntime::new(config)),

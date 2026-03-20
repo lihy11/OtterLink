@@ -9,13 +9,13 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{
     agent::{
         normalized::NormalizedAgentEvent,
-        runtime::{AgentRuntime, RuntimeEvent, RuntimeTurnRequest},
+        runtime::{AgentRuntime, RuntimeEvent, RuntimeSteerRequest, RuntimeTurnRequest},
     },
     config::Config,
     core::{
@@ -46,7 +46,18 @@ pub struct SessionLocks {
 #[derive(Clone)]
 struct ActiveTurnEntry {
     turn_id: String,
+    agent_kind: Option<String>,
+    runtime_session_ref: Option<String>,
+    runtime_turn_ref: Option<String>,
     state: ActiveTurnState,
+}
+
+#[derive(Clone)]
+struct ActiveTurnSnapshot {
+    turn_id: String,
+    agent_kind: Option<String>,
+    runtime_session_ref: Option<String>,
+    runtime_turn_ref: Option<String>,
 }
 
 #[derive(Clone)]
@@ -67,6 +78,9 @@ impl ActiveTurns {
             session_key.to_string(),
             ActiveTurnEntry {
                 turn_id: turn_id.to_string(),
+                agent_kind: None,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
                 state: ActiveTurnState::Starting {
                     stop_requested: false,
                 },
@@ -78,6 +92,9 @@ impl ActiveTurns {
         &self,
         session_key: &str,
         turn_id: &str,
+        agent_kind: Option<&str>,
+        runtime_session_ref: Option<&str>,
+        runtime_turn_ref: Option<&str>,
         cancel: crate::agent::runtime::RuntimeCancelHandle,
     ) {
         let mut guard = self.turns.lock().await;
@@ -94,12 +111,26 @@ impl ActiveTurns {
                 stop_requested: true
             }
         );
+        entry.agent_kind = agent_kind.map(str::to_string);
+        entry.runtime_session_ref = runtime_session_ref.map(str::to_string);
+        entry.runtime_turn_ref = runtime_turn_ref.map(str::to_string);
         entry.state = ActiveTurnState::Running {
             cancel: cancel.clone(),
         };
         if stop_requested {
             cancel.cancel();
         }
+    }
+
+    async fn get(&self, session_key: &str) -> Option<ActiveTurnSnapshot> {
+        let guard = self.turns.lock().await;
+        let entry = guard.get(session_key)?;
+        Some(ActiveTurnSnapshot {
+            turn_id: entry.turn_id.clone(),
+            agent_kind: entry.agent_kind.clone(),
+            runtime_session_ref: entry.runtime_session_ref.clone(),
+            runtime_turn_ref: entry.runtime_turn_ref.clone(),
+        })
     }
 
     async fn request_stop(&self, session_key: &str) -> Option<String> {
@@ -235,6 +266,9 @@ impl CoreService {
                 }
             }
             ParsedInboundMessage::Turn => {
+                if let Some(response) = self.try_steer_active_codex_turn(&request).await? {
+                    return Ok(response);
+                }
                 let turn_id = format!("turn_{}", Uuid::new_v4().simple());
                 let accepted = self
                     .accept_turn(CoreTurnRequest {
@@ -251,6 +285,56 @@ impl CoreService {
                 })
             }
         }
+    }
+
+    async fn try_steer_active_codex_turn(
+        &self,
+        request: &CoreInboundRequest,
+    ) -> Result<Option<CoreInboundResponse>> {
+        let Some(active_turn) = self.active_turns.get(&request.session_key).await else {
+            return Ok(None);
+        };
+        if active_turn.agent_kind.as_deref() != Some("codex") {
+            return Ok(None);
+        }
+        let Some(runtime_session_ref) = active_turn.runtime_session_ref.clone() else {
+            return Ok(None);
+        };
+        let Some(runtime_turn_ref) = active_turn.runtime_turn_ref.clone() else {
+            return Ok(None);
+        };
+
+        let session = self
+            .registry
+            .resolve(&request.session_key, request.parent_session_key.as_deref())
+            .await
+            .context("resolve session failed")?;
+        let selector = self.ensure_runtime_selection(&session).await?;
+        if selector.agent_kind != "codex" {
+            return Ok(None);
+        }
+
+        self.runtime
+            .steer_turn(RuntimeSteerRequest {
+                session_key: request.session_key.clone(),
+                prompt: request.text.clone(),
+                runtime_session_ref,
+                runtime_turn_ref,
+                agent_kind: Some("codex".to_string()),
+                workspace_path: Some(PathBuf::from(&selector.workspace_path)),
+                proxy_mode: Some(selector.proxy_mode.clone()),
+                proxy_url: selector
+                    .proxy_url
+                    .clone()
+                    .or_else(|| self.config.acp_proxy_url.clone()),
+            })
+            .await?;
+
+        Ok(Some(CoreInboundResponse {
+            turn_id: Some(active_turn.turn_id),
+            replies: vec![text_message("已将补充消息发送给当前 Codex 任务。")],
+            react_to_message: false,
+        }))
     }
 
     pub async fn handle_control(&self, request: CoreControlRequest) -> Result<CoreControlResponse> {
@@ -581,6 +665,7 @@ impl CoreService {
             let mut turn = self
                 .runtime
                 .start_turn(RuntimeTurnRequest {
+                    session_key: session.session_key.clone(),
                     prompt,
                     runtime_session_ref: runtime.runtime_session_ref.clone(),
                     agent_kind: Some(runtime.agent_kind.clone()),
@@ -591,8 +676,31 @@ impl CoreService {
                 .await
                 .context("start runtime turn failed")?;
 
+            if let Some(runtime_session_ref) = turn.runtime_session_ref.as_ref() {
+                render.apply_event(NormalizedAgentEvent::RuntimeSessionReady(
+                    runtime_session_ref.clone(),
+                ));
+                self.registry
+                    .replace_runtime_state(
+                        &session.session_key,
+                        Some(runtime_session_ref.clone()),
+                        None,
+                    )
+                    .await?;
+                self.persistence
+                    .update_runtime_state(&runtime.runtime_id, Some(runtime_session_ref), None)
+                    .await?;
+            }
+
             self.active_turns
-                .attach_cancel(&session.session_key, &request.turn_id, turn.cancel.clone())
+                .attach_cancel(
+                    &session.session_key,
+                    &request.turn_id,
+                    Some(&runtime.agent_kind),
+                    turn.runtime_session_ref.as_deref(),
+                    turn.runtime_turn_ref.as_deref(),
+                    turn.cancel.clone(),
+                )
                 .await;
 
             while let Some(event) = turn.events.recv().await {
@@ -996,7 +1104,7 @@ impl CoreService {
         let Some(runtime_session_ref) = runtime.runtime_session_ref.clone() else {
             return Ok(None);
         };
-        let history = self
+        let history = match self
             .runtime
             .load_history(crate::agent::runtime::RuntimeHistoryQuery {
                 agent_kind: Some(selector.agent_kind.clone()),
@@ -1008,7 +1116,17 @@ impl CoreService {
                     .clone()
                     .or_else(|| self.config.acp_proxy_url.clone()),
             })
-            .await?;
+            .await
+        {
+            Ok(history) => history,
+            Err(err) => {
+                warn!(
+                    "runtime history overview unavailable: runtime_id={} agent={} session_ref={} error={err:#}",
+                    runtime.runtime_id, selector.agent_kind, runtime_session_ref
+                );
+                return Ok(None);
+            }
+        };
         let turns = history
             .into_iter()
             .rev()
@@ -1777,6 +1895,14 @@ mod tests {
     #[derive(Clone, Default)]
     struct SlowInterruptibleMockRuntime;
 
+    #[derive(Clone, Default)]
+    struct SteeringMockRuntime {
+        steer_requests: Arc<Mutex<Vec<RuntimeSteerRequest>>>,
+    }
+
+    #[derive(Clone, Default)]
+    struct HistoryUnavailableMockRuntime;
+
     #[async_trait]
     impl AgentRuntime for MockRuntime {
         async fn start_turn(&self, request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
@@ -1790,7 +1916,13 @@ mod tests {
                 }
             });
             let completion = tokio::spawn(async { Ok(RuntimeCompletion::default()) });
-            Ok(RuntimeTurn { events: rx, completion, cancel })
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
         }
 
         async fn list_sessions(
@@ -1825,7 +1957,13 @@ mod tests {
                 drop(tx);
                 Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT))
             });
-            Ok(RuntimeTurn { events: rx, completion, cancel })
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
         }
 
         fn name(&self) -> &'static str {
@@ -1844,11 +1982,69 @@ mod tests {
                 drop(tx);
                 Err(anyhow!(crate::agent::runtime::INTERRUPTED_ERROR_TEXT))
             });
-            Ok(RuntimeTurn { events: rx, completion, cancel })
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
         }
 
         fn name(&self) -> &'static str {
             "slow-interruptible-mock"
+        }
+    }
+
+    #[async_trait]
+    impl AgentRuntime for SteeringMockRuntime {
+        async fn start_turn(&self, _request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
+            let (_tx, rx) = mpsc::unbounded_channel();
+            let (cancel, _cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
+            let completion = tokio::spawn(async { Ok(RuntimeCompletion::default()) });
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
+        }
+
+        async fn steer_turn(&self, request: RuntimeSteerRequest) -> Result<()> {
+            self.steer_requests.lock().await.push(request);
+            Ok(())
+        }
+
+        fn name(&self) -> &'static str {
+            "steering-mock"
+        }
+    }
+
+    #[async_trait]
+    impl AgentRuntime for HistoryUnavailableMockRuntime {
+        async fn start_turn(&self, _request: RuntimeTurnRequest) -> Result<RuntimeTurn> {
+            let (_tx, rx) = mpsc::unbounded_channel();
+            let (cancel, _cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
+            let completion = tokio::spawn(async { Ok(RuntimeCompletion::default()) });
+            Ok(RuntimeTurn {
+                events: rx,
+                completion,
+                cancel,
+                runtime_session_ref: None,
+                runtime_turn_ref: None,
+            })
+        }
+
+        async fn load_history(
+            &self,
+            _query: crate::agent::runtime::RuntimeHistoryQuery,
+        ) -> Result<Vec<crate::agent::runtime::RuntimeHistoryTurn>> {
+            Err(anyhow!("history unavailable"))
+        }
+
+        fn name(&self) -> &'static str {
+            "history-unavailable-mock"
         }
     }
 
@@ -2311,6 +2507,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_plain_message_steers_active_codex_turn() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(SteeringMockRuntime::default());
+        let service = build_service(runtime.clone(), sink).await;
+        let workspace = "/tmp/codex-steer-workspace";
+        let session_key = "control:codex-steer";
+
+        let session = service.registry.resolve(session_key, None).await.unwrap();
+        service
+            .persistence
+            .import_runtime(
+                &runtime_scope_key("codex", workspace),
+                "codex-live",
+                "codex",
+                workspace,
+                "thread-codex-1",
+                None,
+                Some("active codex thread"),
+                false,
+            )
+            .await
+            .unwrap();
+        let runtime_instance = service
+            .persistence
+            .list_runtimes(&runtime_scope_key("codex", workspace))
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        service
+            .replace_runtime_selection(
+                &session,
+                "codex",
+                workspace,
+                Some(&runtime_instance.runtime_id),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        service
+            .active_turns
+            .set_starting(session_key, "turn_active_codex")
+            .await;
+        let (cancel, _cancel_rx) = crate::agent::runtime::RuntimeCancelHandle::new();
+        service
+            .active_turns
+            .attach_cancel(
+                session_key,
+                "turn_active_codex",
+                Some("codex"),
+                Some("thread-codex-1"),
+                Some("turn-codex-1"),
+                cancel,
+            )
+            .await;
+
+        let response = service
+            .handle_inbound(crate::core::inbound::CoreInboundRequest {
+                session_key: session_key.to_string(),
+                parent_session_key: None,
+                text: "在实现之前，先检查一下当前目录结构。".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.turn_id.as_deref(), Some("turn_active_codex"));
+        assert_eq!(response.replies.len(), 1);
+        assert!(!response.react_to_message);
+        let steer_requests = runtime.steer_requests.lock().await.clone();
+        assert_eq!(steer_requests.len(), 1);
+        assert_eq!(steer_requests[0].runtime_session_ref, "thread-codex-1");
+        assert_eq!(steer_requests[0].runtime_turn_ref, "turn-codex-1");
+        assert_eq!(steer_requests[0].prompt, "在实现之前，先检查一下当前目录结构。");
+    }
+
+    #[tokio::test]
     async fn accept_turn_rejection_message_treats_agent_and_workspace_as_parallel_prerequisites() {
         let sink = Arc::new(MockSink::default());
         let runtime = Arc::new(MockRuntime {
@@ -2468,6 +2742,56 @@ mod tests {
         assert_eq!(history.turns.len(), 5);
         assert_eq!(history.turns[0].user_text, "第二个问题");
         assert_eq!(history.turns[4].assistant_text, "第六个回答");
+    }
+
+    #[tokio::test]
+    async fn switch_runtime_ignores_history_overview_failure() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(HistoryUnavailableMockRuntime);
+        let service = build_service(runtime, sink).await;
+        let current_dir = std::env::current_dir().unwrap();
+        let created = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:history-missing".to_string(),
+                parent_session_key: None,
+                action: ControlAction::CreateRuntime,
+                runtime_selector: None,
+                workspace_path: Some(current_dir.to_string_lossy().to_string()),
+                label: Some("codex-history-missing".to_string()),
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+        let runtime_id = created.active_runtime.as_ref().unwrap().runtime_id.clone();
+        service
+            .persistence
+            .update_runtime_state(&runtime_id, Some("sess-history-missing"), None)
+            .await
+            .unwrap();
+
+        let switched = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:history-missing".to_string(),
+                parent_session_key: None,
+                action: ControlAction::SwitchRuntime,
+                runtime_selector: Some(runtime_id),
+                workspace_path: None,
+                label: None,
+                agent_kind: None,
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(switched.ok);
+        assert_eq!(
+            switched.active_runtime.as_ref().map(|item| item.label.as_str()),
+            Some("codex-history-missing")
+        );
+        assert!(switched.history_overview.is_none());
     }
 
     #[tokio::test]

@@ -130,8 +130,8 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 - Node 测试覆盖 auth、pairing、session routing、render、gateway service。
 - `feishu-live.test.js` 会真实调用飞书获取 tenant token。
 - 如需验证 Claude 历史 session 导入，确认 `CLAUDE_HOME_DIR` 指向本机真实 `~/.claude` 或测试目录。
-- 如需验证 ACP `session/list` 是否可用，优先看 `rust.log` 中是否出现 `acp worker connected` 和后续 `list_sessions` 成功返回；只有 agent 不支持该能力时，才需要继续检查本地 `sqlite/jsonl` 回退来源。
-- 如需验证 ACP turn 是否真正结束，优先看 `rust.log` 里的 `turn stop_reason:`。对 `codex-acp`，正常完成应为 `end_turn`；如果这里只有灰卡更新而没有 final 结果，先确认是否拿到了 `stop_reason=end_turn`。
+- 如需验证 `claude_code` 的 ACP `session/list` 是否可用，优先看 `rust.log` 中是否出现 `acp worker connected` 和后续 `list_sessions` 成功返回；只有 agent 不支持该能力时，才需要继续检查本地 `sqlite/jsonl` 回退来源。
+- 如需验证 `codex` turn 是否真正结束，优先看 `rust.log` 里的 `turn stop_reason:` 和 `codex app-server` 相关日志；当前完成信号来自 app-server `turn/completed`。
 
 ## Runtime 控制自检
 
@@ -156,13 +156,14 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 如果切换 agent 后没有看到候选会话，先检查：
 
 1. `claude_code` 的目标 workspace 在 `CLAUDE_HOME_DIR/projects/` 下是否有对应目录。
-2. 当前 ACP agent 是否声明了 `session/list` 和 `loadSession` 能力。
-3. 只有 ACP `session/list` 不可用时，再检查 `claude_code` 的 `sessions-index.json` / `*.jsonl`，或 `codex` 的 `CODEX_HOME_DIR/state_5.sqlite`。
+2. `claude_code` 当前 ACP agent 是否声明了 `session/list` 和 `loadSession` 能力。
+3. `codex` 当前会优先通过 app-server `thread/list` / `thread/read` 读取会话和最近历史；只有运行时能力不可用时才回退检查 `CODEX_HOME_DIR/state_5.sqlite`。`claude_code` 仍会检查 `sessions-index.json` / `*.jsonl` 回退来源。
 4. workspace 是否存在 `/tmp` 与 `/private/tmp` 这样的路径别名问题。
 5. 还没有执行 `/ot pick <short_id>` 或 `/ot new` 时，普通消息不会进入 runtime。
 6. `/ot stop` 只停止当前 turn，不会切换已选 agent / cwd / session；对 ACP 会先走协议取消，再在超时后强制中断。
 7. 如果 stop 之后 agent 还在请求权限，bridge 会直接返回 `Cancelled`，不会继续放行工具调用。
-8. 如果 `codex` 需要联网但 ACP 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
+8. 如果 `codex` 需要联网但 app-server 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
+9. 如果 `codex` 运行中发送普通文本消息后返回“已将补充消息发送给当前 Codex 任务”，这是预期行为：Rust 已把该消息转成 app-server `turn/steer`，不会新建下一轮队列 turn。
 
 ## 排障
 
