@@ -72,6 +72,14 @@ gateway 进程内维护：
 
 这个上下文目前只保存在内存中，服务重启后不会恢复。
 
+### Session Queue Map
+
+gateway 进程内按 `session_key` 维护串行队列，保证同一飞书会话里的入站事件按顺序转发到 Rust。
+
+### Message Dedup Cache
+
+gateway 进程内按 `message_id` 维护 TTL 去重缓存，用来忽略飞书重推或重复投递的同一条消息。
+
 ### Active Turn Map
 
 core 进程内还维护：
@@ -92,6 +100,7 @@ core 进程内还维护：
 
 当前聊天还会保存一份 `runtime_selection`，记录当前选中的 `agent_kind / workspace_path / selected_runtime_id`。
 当前实现同时把 `proxy_mode / proxy_url` 也保存在 `runtime_selection` 中，用于控制后续 runtime 启动时的代理注入。
+`/ot ...` 命令的解析和普通消息是否进入 turn，也都由 Rust 基于这份选择器状态决定；gateway 不再本地解析 slash 命令。
 当 `proxy_mode=default` 时，最终行为由 env 里的 `CLAUDE_CODE_DEFAULT_PROXY_MODE` / `CODEX_DEFAULT_PROXY_MODE` 决定。
 
 - Claude 回退时优先读取 `sessions-index.json`

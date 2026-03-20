@@ -24,9 +24,8 @@
 1. 连接飞书官方 SDK / WebSocket。
 2. 处理配对、白名单、用户身份认证。
 3. 根据飞书上下文生成 `session_key`。
-4. 将平台事件转换为 `CoreTurnRequest` 发给 Rust。
-5. 解析 `/ot ...` 控制命令并转换为 `CoreControlRequest`。
-6. 将 Rust 返回的标准消息渲染为飞书 `text/post/interactive`。
+4. 将认证通过后的平台事件统一转发为 `CoreInboundRequest` 发给 Rust。
+5. 将 Rust 返回的标准消息渲染为飞书 `text/post/interactive`。
 
 ### 2. core 层
 
@@ -73,7 +72,7 @@ flowchart LR
 
 1. 飞书消息进入 JS gateway。
 2. gateway 完成 auth / pairing / session routing。
-3. 普通消息走 `POST /internal/core/turn`；控制命令走 `POST /internal/core/control`。
+3. gateway 将认证成功后的所有文本消息统一转发到 `POST /internal/core/inbound`。
 4. Rust core resolve session、runtime binding、持久化状态。
 5. 如果是 `load_runtimes`，core 会优先按当前 agent 调用 ACP `session/list`；agent 不支持时才回退本地目录或 sqlite 导入历史 session。
 6. `/ot stop` 这类控制命令会由 core 直接取消当前 turn，不经过普通 prompt 执行。
@@ -89,3 +88,4 @@ flowchart LR
 2. gateway 不管理 agent runtime 或 sqlite schema。
 3. `session_key` 由 gateway 生成，Rust 只把它当 opaque string。
 4. core 只信任本地 gateway，因此 `CORE_BIND` 不应暴露到公网。
+5. `/ot ...` 斜杠命令、普通消息、排队和 turn 接受逻辑统一在 Rust 处理，gateway 不再解析命令语义。

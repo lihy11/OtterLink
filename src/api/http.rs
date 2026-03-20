@@ -5,7 +5,11 @@ use axum::{
     Json,
 };
 
-use crate::{app::AppState, protocol::{CoreControlRequest, CoreTurnRequest}};
+use crate::{
+    app::AppState,
+    core::inbound::CoreInboundRequest,
+    protocol::{CoreControlRequest, CoreTurnRequest},
+};
 
 pub async fn healthz() -> &'static str {
     "ok"
@@ -39,6 +43,24 @@ pub async fn submit_control(
     }
 
     match state.core.handle_control(request).await {
+        Ok(response) => (StatusCode::OK, Json(serde_json::to_value(response).unwrap())),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        ),
+    }
+}
+
+pub async fn submit_inbound(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CoreInboundRequest>,
+) -> impl IntoResponse {
+    if !authorized(&state, &headers) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "unauthorized" })));
+    }
+
+    match state.core.handle_inbound(request).await {
         Ok(response) => (StatusCode::OK, Json(serde_json::to_value(response).unwrap())),
         Err(err) => (
             StatusCode::BAD_REQUEST,

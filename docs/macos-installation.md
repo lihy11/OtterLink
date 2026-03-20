@@ -13,6 +13,7 @@
 - 可用 `launchctl kickstart -k` 做受控重启
 
 运行后可通过飞书 `/ot stop` 停止当前 turn；ACP runtime 会走协议取消，不依赖终端前台信号。
+当前 gateway 只负责飞书接入、认证和消息转发；`/ot` 命令与普通消息统一由 core 处理。
 
 ## 一键安装并启动
 

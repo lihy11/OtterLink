@@ -162,7 +162,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 5. 还没有执行 `/ot pick <short_id>` 或 `/ot new` 时，普通消息不会进入 runtime。
 6. `/ot stop` 只停止当前 turn，不会切换已选 agent / cwd / session；对 ACP 会先走协议取消，再在超时后强制中断。
 7. 如果 stop 之后 agent 还在请求权限，bridge 会直接返回 `Cancelled`，不会继续放行工具调用。
-7. 如果 `codex` 需要联网但 ACP 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
+8. 如果 `codex` 需要联网但 ACP 无法访问外网，检查 `/ot proxy` 当前模式，以及 `ACP_PROXY_URL` / `ALL_PROXY` 是否正确。
 
 ## 排障
 
@@ -184,7 +184,7 @@ source .run/feishu.env && cd gateway && node --test test/feishu-live.test.js
 4. Rust 有输出但飞书没回写
    检查 `GATEWAY_EVENT_TOKEN` 是否和 gateway 配置一致。
 5. gateway 提交 turn 失败
-   检查 `CORE_INGEST_TOKEN` 和 `CORE_BASE_URL`。
+   检查 `CORE_INGEST_TOKEN` 和 `CORE_BASE_URL`。当前 `/ot` 控制命令和普通消息都会统一转发到 Rust `/internal/core/inbound`，所以 core 不可用时二者会一起失效。
 6. `systemctl reload` 后服务未恢复
    检查 `journalctl -u otterlink-core -u otterlink-gateway -n 200`，确认新 env 或新 binary 是否能正常启动。
 7. CLI 配置后启动仍失败

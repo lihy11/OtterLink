@@ -5,12 +5,8 @@ class CoreClient {
     this.fetchImpl = fetchImpl;
   }
 
-  async submitTurn(turnRequest) {
-    return this.post('/internal/core/turn', turnRequest, 'core submit');
-  }
-
-  async controlSession(controlRequest) {
-    return this.post('/internal/core/control', controlRequest, 'core control');
+  async submitInbound(inboundRequest) {
+    return this.post('/internal/core/inbound', inboundRequest, 'core inbound');
   }
 
   async post(path, payload, label) {

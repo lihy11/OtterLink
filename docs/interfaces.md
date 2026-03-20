@@ -2,7 +2,62 @@
 
 ## Gateway -> Core
 
+### `POST /internal/core/inbound`
+
+Gateway 统一把认证成功后的文本消息转发到这个入口。Rust core 负责判断它是：
+
+- `/ot ...` 控制命令
+- 普通 agent turn
+- 需要立即返回的帮助或错误消息
+
+Header:
+
+- `x-core-ingest-token: <CORE_INGEST_TOKEN>` 可选但推荐
+
+Request:
+
+```json
+{
+  "session_key": "feishu:thread:oc_xxx:th_xxx",
+  "parent_session_key": "feishu:chat:oc_xxx",
+  "text": "/ot show"
+}
+```
+
+Response:
+
+```json
+{
+  "turn_id": null,
+  "replies": [
+    {
+      "kind": "card",
+      "card": {
+        "title": "Runtime 控制",
+        "theme": "grey",
+        "wide_screen_mode": true,
+        "update_multi": false,
+        "blocks": [{ "kind": "markdown", "text": "..." }]
+      }
+    }
+  ],
+  "react_to_message": false
+}
+```
+
+普通消息会返回：
+
+```json
+{
+  "turn_id": "turn_xxx",
+  "replies": [],
+  "react_to_message": true
+}
+```
+
 ### `POST /internal/core/turn`
+
+保留给内部测试和底层调用。生产消息入口优先使用 `/internal/core/inbound`。
 
 Header:
 
@@ -30,7 +85,7 @@ Response:
 
 ### `POST /internal/core/control`
 
-用于查看、导入、切换 runtime，或调整 workspace。
+保留给内部测试和底层调用。`/ot ...` 在生产链路中不再由 gateway 解析，而是由 Rust 在 `/internal/core/inbound` 内部转成 control request。
 
 Request:
 
@@ -187,8 +242,7 @@ ACP 真正恢复历史时会调用 `session/load`。如果 agent 没有声明 `l
 ACP 单轮是否结束，以 `session/prompt` 的 `PromptResponse.stop_reason` 为准。`codex-acp` 的正常收尾是 `end_turn`；`cancelled / max_tokens / max_turn_requests / refusal` 也都会被记录到 runtime completion。
 ACP worker 使用持久连接，`initialize` 在 worker 建立时只执行一次，不再每轮重启 agent 进程。
 
-`/ot help` 由 gateway 本地响应，不调用 core。
-拼错的 `/ot` 子命令或缺参数情况，也会在 gateway 直接报错，不会进入普通 agent turn。
+`/ot help`、拼错的 `/ot` 子命令和缺参数情况，都由 Rust 在 `/internal/core/inbound` 里直接返回即时回复，不进入普通 agent turn。
 优先使用 `sessions-index.json`；如果索引不存在，会回退扫描 `*.jsonl` 头部元数据。
 控制结果会渲染为 Markdown 表格卡片。
 表格前只保留当前 `Agent / CWD / Proxy / Session` 摘要，表格列为 `状态 / Tag / 短ID / Prompt`。

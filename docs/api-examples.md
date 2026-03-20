@@ -3,6 +3,18 @@
 ## Gateway -> Core
 
 ```bash
+curl -X POST http://127.0.0.1:7211/internal/core/inbound \
+  -H 'content-type: application/json' \
+  -H "x-core-ingest-token: $CORE_INGEST_TOKEN" \
+  -d '{
+    "session_key": "feishu:p2p:ou_xxx",
+    "text": "/ot show"
+  }'
+```
+
+以下两个接口仍保留给底层调试，但生产链路优先统一走 `/internal/core/inbound`：
+
+```bash
 curl -X POST http://127.0.0.1:7211/internal/core/turn \
   -H 'content-type: application/json' \
   -H "x-core-ingest-token: $CORE_INGEST_TOKEN" \
@@ -16,24 +28,13 @@ curl -X POST http://127.0.0.1:7211/internal/core/turn \
 ```bash
 curl -X POST http://127.0.0.1:7211/internal/core/control \
   -H 'content-type: application/json' \
-  -H \"x-core-ingest-token: $CORE_INGEST_TOKEN\" \
+  -H "x-core-ingest-token: $CORE_INGEST_TOKEN" \
   -d '{
-    \"session_key\": \"feishu:p2p:ou_xxx\",
-    \"action\": \"load_runtimes\",
-    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/otterlink/workspace\"
-  }'
-```
-
-```bash
-curl -X POST http://127.0.0.1:7211/internal/core/control \
-  -H 'content-type: application/json' \
-  -H \"x-core-ingest-token: $CORE_INGEST_TOKEN\" \
-  -d '{
-    \"session_key\": \"feishu:p2p:ou_xxx\",
-    \"action\": \"create_runtime\",
-    \"label\": \"claude-alt\",
-    \"agent_kind\": \"claude_code\",
-    \"workspace_path\": \"/Users/haiyangli/Desktop/InterestingPorjects/otterlink\"
+    "session_key": "feishu:p2p:ou_xxx",
+    "action": "create_runtime",
+    "label": "claude-alt",
+    "agent_kind": "claude_code",
+    "workspace_path": "/Users/haiyangli/Desktop/InterestingPorjects/otterlink"
   }'
 ```
 
@@ -133,6 +134,7 @@ otterlink status
 4. `/ot pick` 如果命中已有 session，除了控制结果表格外，还会额外回一张 `历史概览` 卡片，展示裁剪后的最近 5 轮 `user / assistant` 对话。
 5. `/ot stop` 会停止当前正在运行的 turn；ACP 会发 `session/cancel`，`exec_json` 会终止本地进程。
 6. `/ot proxy` 会控制后续 ACP/exec 启动时是否注入代理环境变量。
+7. 在当前实现里，gateway 只做认证和转发；`/ot` 的解析与错误提示由 Rust core 返回。
 
 ## 控制台配置覆盖项
 

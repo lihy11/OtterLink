@@ -2,7 +2,114 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { GatewayService } = require('../src/service');
-const { renderControlResponse, renderRuntimeHelp } = require('../src/commands');
+
+function parseControlCommand(text) {
+  const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return null;
+  }
+  const [head, action, ...rest] = parts;
+  if (!['/ot', 'ot', '会话'].includes(head.toLowerCase())) {
+    return null;
+  }
+  const normalizedAction = (action || '').toLowerCase();
+  if (!normalizedAction || ['help', '帮助'].includes(normalizedAction)) {
+    return { local_action: 'runtime_help' };
+  }
+  if (['show', '当前', '查看'].includes(normalizedAction)) {
+    return { action: 'show_runtime' };
+  }
+  if (['list', '列表'].includes(normalizedAction)) {
+    return { action: 'list_runtimes' };
+  }
+  if (['load', 'import', '加载'].includes(normalizedAction)) {
+    return { action: 'load_runtimes', workspace_path: rest.join(' ') || null };
+  }
+  if (['new', '新建', '创建'].includes(normalizedAction)) {
+    return { action: 'create_runtime', label: rest.join(' ') || null };
+  }
+  if (['use', 'switch', '切换'].includes(normalizedAction)) {
+    if (rest.length === 0) {
+      return { local_action: 'runtime_invalid', message: '缺少 agent 名称。用法：`/ot use <claude|codex>`' };
+    }
+    return { action: 'use_agent', agent_kind: rest.join(' ') || null };
+  }
+  if (['pick', '选择'].includes(normalizedAction)) {
+    if (rest.length === 0) {
+      return { local_action: 'runtime_invalid', message: '缺少会话 ID。用法：`/ot pick <short_id>`' };
+    }
+    return { action: 'switch_runtime', runtime_selector: rest.join(' ') || null };
+  }
+  if (['cwd', '工作区', '目录'].includes(normalizedAction)) {
+    if (rest.length === 0) {
+      return { local_action: 'runtime_invalid', message: '缺少路径。用法：`/ot cwd <path>`' };
+    }
+    return { action: 'set_workspace', workspace_path: rest.join(' ') || null };
+  }
+  if (['stop', 'cancel', '停止', '中断'].includes(normalizedAction)) {
+    return { action: 'stop_runtime' };
+  }
+  if (['proxy', '代理'].includes(normalizedAction)) {
+    if (rest.length === 0) {
+      return { local_action: 'runtime_invalid', message: '缺少代理模式。用法：`/ot proxy <default|on|off> [proxy_url]`' };
+    }
+    const [mode, ...proxyRest] = rest;
+    if (/^(https?|socks5):\/\//i.test(mode)) {
+      return { action: 'set_proxy', proxy_mode: 'on', proxy_url: mode };
+    }
+    return { action: 'set_proxy', proxy_mode: mode || null, proxy_url: proxyRest.join(' ') || null };
+  }
+  return { local_action: 'runtime_invalid', message: `未知命令：\`${action}\`。请使用 \`/ot help\` 查看支持的子命令。` };
+}
+
+function renderRuntimeHelp() {
+  return {
+    kind: 'card',
+    card: {
+      title: 'Runtime Help',
+      theme: 'grey',
+      wide_screen_mode: true,
+      update_multi: false,
+      blocks: [{ kind: 'markdown', text: '`/ot help`\n`/ot list`\n`/ot use`\n`/ot pick`\n`/ot cwd`\n`/ot proxy`\n`会话 帮助`' }],
+    },
+  };
+}
+
+function renderControlResponse(response) {
+  return {
+    kind: 'card',
+    card: {
+      title: 'Runtime 控制',
+      theme: 'grey',
+      wide_screen_mode: true,
+      update_multi: false,
+      blocks: [
+        { kind: 'markdown', text: `📣 **Runtime 控制结果**\n${response.message}` },
+        { kind: 'divider' },
+        {
+          kind: 'markdown',
+          text: `🎛️ **当前选择器**\n- Agent: \`${response.selector.agent_kind}\`\n- CWD: \`${response.selector.workspace_path}\`\n- Proxy: ${response.selector.proxy_mode}${response.selector.proxy_url ? ` · ${response.selector.proxy_url}` : ''}\n- Session: ${response.active_runtime ? '`' + (response.active_runtime.runtime_session_ref || response.active_runtime.runtime_id).slice(0, 8) + '`' : '未选择'}`,
+        },
+      ],
+    },
+  };
+}
+
+function renderHistoryOverview(historyOverview) {
+  return {
+    kind: 'card',
+    card: {
+      title: '历史概览',
+      theme: 'grey',
+      wide_screen_mode: true,
+      update_multi: false,
+      blocks: [
+        { kind: 'markdown', text: `历史概览 ${historyOverview.runtime_session_ref}` },
+        { kind: 'markdown', text: historyOverview.turns.map((turn) => `- user: ${turn.user_text}\n- assistant: ${turn.assistant_text}`).join('\n\n') },
+      ],
+    },
+  };
+}
 
 function makeService(overrides = {}) {
   const calls = {
@@ -49,14 +156,37 @@ function makeService(overrides = {}) {
       },
     },
     coreClient: {
-      async submitTurn(turnRequest) {
-        calls.submits.push(turnRequest);
-        return { ok: true, turn_id: turnRequest.turn_id };
-      },
-      async controlSession(controlRequest) {
+      async submitInbound(inboundRequest) {
+        const controlRequest = parseControlCommand(inboundRequest.text);
+        if (!controlRequest) {
+          const turnRequest = {
+            turn_id: `turn_${calls.submits.length + 1}`,
+            session_key: inboundRequest.session_key,
+            parent_session_key: inboundRequest.parent_session_key,
+            text: inboundRequest.text,
+          };
+          calls.submits.push(turnRequest);
+          return { turn_id: turnRequest.turn_id, replies: [], react_to_message: true };
+        }
+
+        if (controlRequest.local_action === 'runtime_help') {
+          return { replies: [renderRuntimeHelp()], react_to_message: false };
+        }
+        if (controlRequest.local_action === 'runtime_invalid') {
+          return {
+            replies: [{ kind: 'text', text: `Runtime 命令错误：${controlRequest.message}` }],
+            react_to_message: false,
+          };
+        }
+
         calls.controls = calls.controls || [];
-        calls.controls.push(controlRequest);
-        return {
+        const request = {
+          session_key: inboundRequest.session_key,
+          parent_session_key: inboundRequest.parent_session_key,
+          ...controlRequest,
+        };
+        calls.controls.push(request);
+        const response = {
           ok: true,
           message: 'runtime ok',
           selector: {
@@ -76,6 +206,11 @@ function makeService(overrides = {}) {
           },
           runtimes: [],
         };
+        const replies = [renderControlResponse(response)];
+        if (response.history_overview && response.history_overview.turns && response.history_overview.turns.length > 0) {
+          replies.push(renderHistoryOverview(response.history_overview));
+        }
+        return { replies, react_to_message: false };
       },
     },
     pairings: {
@@ -543,7 +678,7 @@ test('ot control command is routed to core control api instead of normal turn ap
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.cardReplies.length, 1);
@@ -557,15 +692,13 @@ test('control commands are serialized within the same session', async () => {
   });
   const { service } = makeService({
     coreClient: {
-      async submitTurn(turnRequest) {
-        return { ok: true, turn_id: turnRequest.turn_id };
-      },
-      async controlSession(controlRequest) {
+      async submitInbound(inboundRequest) {
+        const controlRequest = parseControlCommand(inboundRequest.text);
         callOrder.push(controlRequest.action);
         if (controlRequest.action === 'set_workspace') {
           await waitForFirst;
         }
-        return {
+        const response = {
           ok: true,
           message: 'runtime ok',
           selector: {
@@ -576,6 +709,7 @@ test('control commands are serialized within the same session', async () => {
           active_runtime: null,
           runtimes: [],
         };
+        return { replies: [renderControlResponse(response)], react_to_message: false };
       },
     },
   });
@@ -620,7 +754,7 @@ test('ot cwd is routed to core control api', async () => {
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'set_workspace');
@@ -639,7 +773,7 @@ test('ot proxy command accepts shorthand url without explicit on', async () => {
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'set_proxy');
@@ -647,7 +781,7 @@ test('ot proxy command accepts shorthand url without explicit on', async () => {
   assert.equal(calls.controls[0].proxy_url, 'http://127.0.0.1:7890');
 });
 
-test('ot help command is handled in gateway without calling core', async () => {
+test('ot help command is forwarded to core and rendered as an immediate reply', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -659,13 +793,13 @@ test('ot help command is handled in gateway without calling core', async () => {
     },
   });
 
-  assert.equal(result.kind, 'control_help');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal((calls.controls || []).length, 0);
   assert.equal(calls.cardReplies.length, 1);
 });
 
-test('unknown ot subcommand is rejected in gateway and not forwarded to core or agent', async () => {
+test('unknown ot subcommand is rejected by core and returned as an immediate reply', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -677,7 +811,7 @@ test('unknown ot subcommand is rejected in gateway and not forwarded to core or 
     },
   });
 
-  assert.equal(result.kind, 'control_invalid');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal((calls.controls || []).length, 0);
   assert.equal(calls.replies.length, 1);
@@ -685,7 +819,7 @@ test('unknown ot subcommand is rejected in gateway and not forwarded to core or 
   assert.match(JSON.stringify(calls.replies[0].rendered), /ot help/);
 });
 
-test('ot use without agent argument is rejected in gateway', async () => {
+test('ot use without agent argument is rejected by core', async () => {
   const { service, calls } = makeService();
   const result = await service.handleFeishuEvent({
     sender: { sender_id: { open_id: 'ou_allow' } },
@@ -697,7 +831,7 @@ test('ot use without agent argument is rejected in gateway', async () => {
     },
   });
 
-  assert.equal(result.kind, 'control_invalid');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal((calls.controls || []).length, 0);
   assert.equal(calls.replies.length, 1);
@@ -716,7 +850,7 @@ test('ot load command is routed to core control api with workspace path', async 
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'load_runtimes');
@@ -735,7 +869,7 @@ test('ot cwd command is routed to core control api as set_workspace', async () =
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.submits.length, 0);
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'set_workspace');
@@ -754,7 +888,7 @@ test('ot use command is routed to core control api as use_agent', async () => {
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'use_agent');
   assert.equal(calls.controls[0].agent_kind, 'codex');
@@ -772,7 +906,7 @@ test('ot proxy command is routed to core control api as set_proxy', async () => 
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'set_proxy');
   assert.equal(calls.controls[0].proxy_mode, 'on');
@@ -791,7 +925,7 @@ test('ot stop command is routed to core control api as stop_runtime', async () =
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'stop_runtime');
 });
@@ -808,7 +942,7 @@ test('ot pick command is routed to core control api as switch_runtime', async ()
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].action, 'switch_runtime');
   assert.equal(calls.controls[0].runtime_selector, 'c06c9a5e');
@@ -817,14 +951,11 @@ test('ot pick command is routed to core control api as switch_runtime', async ()
 test('ot pick sends a second history overview card when core returns session history', async () => {
   const { service, calls } = makeService({
     coreClient: {
-      async submitTurn(turnRequest) {
-        calls.submits.push(turnRequest);
-        return { ok: true, turn_id: turnRequest.turn_id };
-      },
-      async controlSession(controlRequest) {
+      async submitInbound(inboundRequest) {
+        const controlRequest = parseControlCommand(inboundRequest.text);
         calls.controls = calls.controls || [];
         calls.controls.push(controlRequest);
-        return {
+        const response = {
           ok: true,
           message: '已切换到 `sess-history`。',
           selector: {
@@ -854,6 +985,10 @@ test('ot pick sends a second history overview card when core returns session his
             ],
           },
         };
+        return {
+          replies: [renderControlResponse(response), renderHistoryOverview(response.history_overview)],
+          react_to_message: false,
+        };
       },
     },
   });
@@ -867,7 +1002,7 @@ test('ot pick sends a second history overview card when core returns session his
     },
   });
 
-  assert.equal(result.kind, 'control');
+  assert.equal(result.kind, 'immediate_reply');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.cardReplies.length, 2);
   const historyPayload = JSON.stringify(calls.cardReplies[1].card.body.elements);
@@ -879,11 +1014,8 @@ test('ot pick sends a second history overview card when core returns session his
 test('turn rejection from core is replied back to feishu user', async () => {
   const { service, calls } = makeService({
     coreClient: {
-      async submitTurn() {
+      async submitInbound() {
         throw new Error('core submit failed status=400 error=请先执行 /ot pick <short_id> 或 /ot new');
-      },
-      async controlSession() {
-        throw new Error('should not be called');
       },
     },
   });
@@ -901,67 +1033,4 @@ test('turn rejection from core is replied back to feishu user', async () => {
   assert.equal(result.reason, 'turn_rejected');
   assert.equal(calls.replies.length, 1);
   assert.match(JSON.stringify(calls.replies[0].rendered), /ot pick/);
-});
-
-test('renderControlResponse builds a card with runtime rows', async () => {
-  const message = renderControlResponse({
-    ok: true,
-    message: 'loaded',
-    selector: {
-      agent_kind: 'claude_code',
-      workspace_path: '/tmp/demo',
-      has_selected_runtime: true,
-      proxy_mode: 'default',
-      proxy_url: 'http://127.0.0.1:7890',
-    },
-    active_runtime: {
-      runtime_id: 'rt_1234567890',
-      label: 'claude-main',
-      agent_kind: 'claude_code',
-      workspace_path: '/tmp/demo',
-      runtime_session_ref: 'c06c9a5e-b64c-4637-b28b-d424d0ddd754',
-      tag: 'master',
-      prompt_preview: '这是测试进程',
-      has_runtime_session_ref: true,
-      is_active: true,
-    },
-    runtimes: [
-      {
-        runtime_id: 'rt_1234567890',
-        label: 'claude-main',
-        agent_kind: 'claude_code',
-        workspace_path: '/tmp/demo',
-        runtime_session_ref: 'c06c9a5e-b64c-4637-b28b-d424d0ddd754',
-        tag: 'master',
-        prompt_preview: '这是测试进程',
-        has_runtime_session_ref: true,
-        is_active: true,
-      },
-    ],
-  });
-
-  assert.equal(message.kind, 'card');
-  assert.equal(message.card.title, 'Runtime 控制');
-  const body = JSON.stringify(message.card.blocks);
-  assert.match(body, /当前选择器/);
-  assert.match(body, /Proxy:/);
-  assert.match(body, /当前已选会话/);
-  assert.match(body, /状态 \\| Tag \\| 短ID \\| Prompt/);
-  assert.match(body, /c06c9a5e/);
-  assert.match(body, /这是测试进程/);
-  assert.match(body, /Agent: `claude_code`/);
-  assert.match(body, /CWD: `\/tmp\/demo`/);
-});
-
-test('renderRuntimeHelp lists supported ot commands', async () => {
-  const message = renderRuntimeHelp();
-  assert.equal(message.kind, 'card');
-  const body = JSON.stringify(message.card.blocks);
-  assert.match(body, /ot help/);
-  assert.match(body, /ot list/);
-  assert.match(body, /ot use/);
-  assert.match(body, /ot pick/);
-  assert.match(body, /ot cwd/);
-  assert.match(body, /ot proxy/);
-  assert.match(body, /会话 帮助/);
 });

@@ -17,6 +17,7 @@
 
 ## 当前实现策略
 
+0. 飞书 gateway 只负责认证和转发；是否为 `/ot` 控制命令、是否进入 ACP turn，统一在 Rust core 决定。
 1. ACP worker 按 `agent + cwd + proxy` 维度持久化，避免每轮重启 agent 进程。
 2. 单个 worker 当前按顺序处理命令，保证同一 ACP 连接内的 `session/update` 与 `session/prompt` 收尾语义清晰。
 3. `codex-acp` 的正常收尾以 `end_turn` 为准，不依赖某个单独的 update 事件。

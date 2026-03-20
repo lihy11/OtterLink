@@ -1,6 +1,3 @@
-const crypto = require('node:crypto');
-
-const { parseControlCommand, renderControlResponse, renderHistoryOverview, renderRuntimeHelp } = require('./commands');
 const { isAuthorized, parsePairCommand, unauthorizedHint, validatePairRequest } = require('./feishu/auth');
 const { MessageDeduper } = require('./feishu/dedup');
 const { renderCardMarkdown, renderOutboundMessage } = require('./feishu/render');
@@ -61,62 +58,44 @@ class GatewayService {
   }
 
   async handleSessionEvent(inbound, route) {
-    const controlCommand = parseControlCommand(inbound.text);
-    if (controlCommand) {
-      if (controlCommand.local_action === 'runtime_help') {
-        await this.replyMessage(inbound.messageId, renderRuntimeHelp());
-        return { handled: true, kind: 'control_help', sessionKey: route.sessionKey };
-      }
-      if (controlCommand.local_action === 'runtime_invalid') {
-        await this.replyText(inbound.messageId, `Runtime 命令错误：${controlCommand.message}`);
-        return { handled: true, kind: 'control_invalid', sessionKey: route.sessionKey };
-      }
-      try {
-        const response = await this.coreClient.controlSession({
-          session_key: route.sessionKey,
-          parent_session_key: route.parentSessionKey,
-          ...controlCommand,
-        });
-        await this.replyMessage(inbound.messageId, renderControlResponse(response));
-        if (response.history_overview && response.history_overview.turns && response.history_overview.turns.length > 0) {
-          await this.replyMessage(inbound.messageId, renderHistoryOverview(response.history_overview));
-        }
-        return { handled: true, kind: 'control', sessionKey: route.sessionKey };
-      } catch (error) {
-        await this.replyText(inbound.messageId, `Runtime 控制失败：${extractCoreError(error)}`);
-        return { handled: true, kind: 'control_error', sessionKey: route.sessionKey };
-      }
-    }
-
-    const turnId = `turn_${crypto.randomUUID()}`;
-    this.turnContexts.set(turnId, {
-      replyToMessageId: inbound.messageId,
-      slotStates: new Map(),
-      openId: inbound.openId,
-      route,
-      createdAt: Date.now(),
-      cardFallbackSlots: new Set(),
-    });
-
     try {
-      await this.coreClient.submitTurn({
-        turn_id: turnId,
+      const response = await this.coreClient.submitInbound({
         session_key: route.sessionKey,
         parent_session_key: route.parentSessionKey,
         text: inbound.text,
       });
-      try {
-        await this.feishuClient.reactToMessage?.(inbound.messageId, 'OK');
-      } catch (error) {
-        this.logger.error?.('[gateway] message reaction failed', error);
+
+      if (response.replies && response.replies.length > 0) {
+        for (const reply of response.replies) {
+          await this.replyMessage(inbound.messageId, reply);
+        }
+        return { handled: true, kind: 'immediate_reply', sessionKey: route.sessionKey };
       }
+
+      const turnId = response.turn_id;
+      if (!turnId) {
+        return { ignored: true, reason: 'empty_inbound_response', sessionKey: route.sessionKey };
+      }
+      this.turnContexts.set(turnId, {
+        replyToMessageId: inbound.messageId,
+        slotStates: new Map(),
+        openId: inbound.openId,
+        route,
+        createdAt: Date.now(),
+        cardFallbackSlots: new Set(),
+      });
+      if (response.react_to_message) {
+        try {
+          await this.feishuClient.reactToMessage?.(inbound.messageId, 'OK');
+        } catch (error) {
+          this.logger.error?.('[gateway] message reaction failed', error);
+        }
+      }
+      return { accepted: true, turnId, sessionKey: route.sessionKey };
     } catch (error) {
-      this.turnContexts.delete(turnId);
       await this.replyText(inbound.messageId, `无法开始本轮：${extractCoreError(error)}`);
       return { ignored: true, reason: 'turn_rejected', sessionKey: route.sessionKey };
     }
-
-    return { accepted: true, turnId, sessionKey: route.sessionKey };
   }
 
   enqueueForSession(sessionKey, handler) {

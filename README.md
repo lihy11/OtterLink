@@ -17,9 +17,10 @@ OtterLink connects Feishu conversations to local agent runtimes such as `codex` 
 - Keep runtime execution and session state on your own machine.
 - Switch agent, workspace, proxy, and session directly from chat.
 - Support both operator workflows and service deployment.
+- Keep the gateway thin: authenticate Feishu, route sessions, and forward all authenticated text to Rust core.
 - Separate integration concerns cleanly:
-  - Rust owns sessions, turns, persistence, and runtime orchestration.
-  - Node.js owns Feishu delivery, auth, pairing, and rendering.
+  - Rust owns slash-command handling, sessions, turns, persistence, and runtime orchestration.
+  - Node.js owns Feishu delivery, auth, pairing, deduplication, and rendering.
 
 ## Features
 

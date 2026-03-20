@@ -7,6 +7,8 @@
 1. Rust `core`
 2. Node.js `gateway`
 
+其中 gateway 当前只负责飞书接入、认证和消息转发；`/ot` 命令与普通消息统一由 core 处理。
+
 推荐用 `systemd` 托管，原因：
 
 - 进程异常退出后自动拉起

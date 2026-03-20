@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::{
     agent::runtime::build_runtime,
-    api::http::{healthz, submit_control, submit_turn},
+    api::http::{healthz, submit_control, submit_inbound, submit_turn},
     config::Config,
     core::{
         persistence::Persistence,
@@ -92,6 +92,7 @@ pub async fn run() -> Result<()> {
 
     let app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/internal/core/inbound", post(submit_inbound))
         .route("/internal/core/turn", post(submit_turn))
         .route("/internal/core/control", post(submit_control))
         .with_state(state);

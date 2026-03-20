@@ -63,7 +63,7 @@
 7. `set_proxy` 会更新当前选择器的代理模式，影响后续 runtime 进程启动。
 8. `stop_runtime` 只取消当前进行中的 turn，不改变当前三元组选择器。
 9. `/ot pick` 选中已有 session 后，会把 ACP `session/load` 的历史回放缓存成一份独立的 `历史概览`，单独发卡片给用户确认当前进度。
-4. 控制命令优先于普通 turn，在 gateway 解析后直接走 control API。
+4. 控制命令优先于普通 turn，但命令解析发生在 Rust `core`，不再发生在 gateway。
 5. `/ot pick` 支持完整 `runtime_id`、`runtime_session_ref` 前缀、或 label，避免在 IM 里复制长 id。
 
 会话导入规则：

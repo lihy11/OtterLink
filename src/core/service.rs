@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use uuid::Uuid;
 
 use crate::{
     agent::{
@@ -18,6 +19,11 @@ use crate::{
     },
     config::Config,
     core::{
+        commands::{
+            parse_inbound_message, render_control_response, render_invalid_runtime_command,
+            render_runtime_help, ParsedInboundMessage,
+        },
+        inbound::{CoreInboundRequest, CoreInboundResponse},
         message_builder::{card_message, text_message},
         models::{CardBlock, CardTheme, OutboundMessage, TodoEntry},
         persistence::{Persistence, RuntimeInstance},
@@ -196,6 +202,55 @@ impl CoreService {
             ok: true,
             turn_id,
         })
+    }
+
+    pub async fn handle_inbound(&self, request: CoreInboundRequest) -> Result<CoreInboundResponse> {
+        match parse_inbound_message(
+            &request.text,
+            request.session_key.clone(),
+            request.parent_session_key.clone(),
+        ) {
+            ParsedInboundMessage::Help => Ok(CoreInboundResponse {
+                turn_id: None,
+                replies: vec![render_runtime_help()],
+                react_to_message: false,
+            }),
+            ParsedInboundMessage::Invalid { message } => Ok(CoreInboundResponse {
+                turn_id: None,
+                replies: vec![render_invalid_runtime_command(&message)],
+                react_to_message: false,
+            }),
+            ParsedInboundMessage::Control(control) => {
+                match self.handle_control(control).await {
+                    Ok(response) => Ok(CoreInboundResponse {
+                        turn_id: None,
+                        replies: render_control_response(&response),
+                        react_to_message: false,
+                    }),
+                    Err(err) => Ok(CoreInboundResponse {
+                        turn_id: None,
+                        replies: vec![text_message(format!("Runtime 控制失败：{}", err))],
+                        react_to_message: false,
+                    }),
+                }
+            }
+            ParsedInboundMessage::Turn => {
+                let turn_id = format!("turn_{}", Uuid::new_v4().simple());
+                let accepted = self
+                    .accept_turn(CoreTurnRequest {
+                        turn_id: turn_id.clone(),
+                        session_key: request.session_key,
+                        parent_session_key: request.parent_session_key,
+                        text: request.text,
+                    })
+                    .await?;
+                Ok(CoreInboundResponse {
+                    turn_id: Some(accepted.turn_id),
+                    replies: Vec::new(),
+                    react_to_message: true,
+                })
+            }
+        }
     }
 
     pub async fn handle_control(&self, request: CoreControlRequest) -> Result<CoreControlResponse> {
@@ -2187,6 +2242,72 @@ mod tests {
             .unwrap();
         assert_eq!(switched.active_runtime.as_ref().unwrap().label, "claude-alt");
         assert!(switched.runtimes.iter().any(|runtime| runtime.label == "claude-alt"));
+    }
+
+    #[tokio::test]
+    async fn inbound_help_returns_immediate_reply() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let service = build_service(runtime, sink).await;
+
+        let response = service
+            .handle_inbound(crate::core::inbound::CoreInboundRequest {
+                session_key: "control:help".to_string(),
+                parent_session_key: None,
+                text: "/ot help".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert!(response.turn_id.is_none());
+        assert_eq!(response.replies.len(), 1);
+        assert!(!response.react_to_message);
+    }
+
+    #[tokio::test]
+    async fn inbound_plain_message_accepts_turn_and_generates_turn_id() {
+        let sink = Arc::new(MockSink::default());
+        let runtime = Arc::new(MockRuntime {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            events: Vec::new(),
+            sessions: Vec::new(),
+            history: Vec::new(),
+        });
+        let service = build_service(runtime, sink).await;
+
+        let current_dir = std::env::current_dir().unwrap();
+        let _ = service
+            .handle_control(CoreControlRequest {
+                session_key: "control:plain".to_string(),
+                parent_session_key: None,
+                action: ControlAction::CreateRuntime,
+                runtime_selector: None,
+                workspace_path: Some(current_dir.to_string_lossy().to_string()),
+                label: Some("codex-plain".to_string()),
+                agent_kind: Some("codex".to_string()),
+                proxy_mode: None,
+                proxy_url: None,
+            })
+            .await
+            .unwrap();
+
+        let response = service
+            .handle_inbound(crate::core::inbound::CoreInboundRequest {
+                session_key: "control:plain".to_string(),
+                parent_session_key: None,
+                text: "hello".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert!(response.turn_id.as_deref().unwrap_or_default().starts_with("turn_"));
+        assert!(response.replies.is_empty());
+        assert!(response.react_to_message);
     }
 
     #[tokio::test]

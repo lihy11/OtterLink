@@ -2,6 +2,8 @@
 
 ## Gateway 侧
 
+gateway 当前只负责认证、去重、session 路由和消息转发；`/ot` 命令解析在 Rust core 完成。
+
 - `BIND`: gateway 监听地址，默认 `127.0.0.1:1127`
 - `APP_ID`, `APP_SECRET`: 飞书机器人凭据
 - 飞书应用需包含 `cardkit:card:write`，否则 CardKit 卡片无法创建
